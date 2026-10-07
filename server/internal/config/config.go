@@ -1,6 +1,4 @@
-// Package config loads server configuration from environment variables
-// (optionally via a .env file loaded by main). Variable names and defaults
-// come from DESCRIPTION.md section 8.
+// Package config loads env per DESCRIPTION.md section 8; main loads .env.
 package config
 
 import (
@@ -8,8 +6,7 @@ import (
 	"strconv"
 )
 
-// Config holds all server settings. No hard-coded hosts, ports, or secrets
-// elsewhere in the code.
+// Config centralizes settings; nothing hard-codes hosts or secrets.
 type Config struct {
 	ServerAddr         string
 	GinMode            string
@@ -21,20 +18,19 @@ type Config struct {
 	ExportBatchSize    int
 	ExportFlushSeconds int
 	AlertOnAuthorized  bool
-	// AlertToken guards /ws/alerts and the dashboard when set. Empty disables
-	// the check (local dev). Browsers pass it as ?token= (WS cannot set
-	// headers); programmatic clients may also use X-Alert-Token or
-	// Authorization: Bearer.
+	// AlertToken guards /ws/alerts; empty disables auth. ?token= exists because browsers can't set WS headers.
 	AlertToken string
-	// AlertQueueSize is the per-client buffered send queue for /ws/alerts.
-	// Bounded so a slow client can be evicted instead of blocking the server.
-	AlertQueueSize   int
-	BeaconWindowS    float64
-	BeaconRetentionS float64
-	ResolveGraceMS   int
-	VisualMinConf    float64
-	DetectorToken    string
-	SnapshotDir      string
+	// AlertQueueSize bounds per-client buffers; slow clients get evicted, never block.
+	AlertQueueSize int
+	// ExportIdentifiedOnly sends only server-confirmed identified drones to
+	// Sheets/CSV. MongoDB still stores every detection (audit, idempotency).
+	ExportIdentifiedOnly bool
+	BeaconWindowS        float64
+	BeaconRetentionS     float64
+	ResolveGraceMS       int
+	VisualMinConf        float64
+	DetectorToken        string
+	SnapshotDir          string
 }
 
 func getenv(key, def string) string {
@@ -71,26 +67,27 @@ func getenvBool(key string, def bool) bool {
 	return def
 }
 
-// Load reads configuration from the environment with DESCRIPTION.md defaults.
+// Load reads env with DESCRIPTION.md section 8 defaults.
 func Load() Config {
 	return Config{
-		ServerAddr:         getenv("SERVER_ADDR", ":8080"),
-		GinMode:            getenv("GIN_MODE", "debug"),
-		MongoURI:           getenv("MONGO_URI", "mongodb://localhost:27017"),
-		MongoDB:            getenv("MONGO_DB", "drone_detect_app"),
-		ExportBackend:      getenv("EXPORT_BACKEND", "csv"),
-		GoogleCredsFile:    getenv("GOOGLE_CREDENTIALS_FILE", ""),
-		GoogleSheetID:      getenv("GOOGLE_SHEET_ID", ""),
-		ExportBatchSize:    getenvInt("EXPORT_BATCH_SIZE", 50),
-		ExportFlushSeconds: getenvInt("EXPORT_FLUSH_SECONDS", 5),
-		AlertOnAuthorized:  getenvBool("ALERT_ON_AUTHORIZED", false),
-		AlertToken:         getenv("ALERT_TOKEN", ""),
-		AlertQueueSize:     getenvInt("ALERT_QUEUE_SIZE", 64),
-		BeaconWindowS:      getenvFloat("BEACON_WINDOW_S", 3),
-		BeaconRetentionS:   getenvFloat("BEACON_RETENTION_S", 60),
-		ResolveGraceMS:     getenvInt("RESOLVE_GRACE_MS", 1500),
-		VisualMinConf:      getenvFloat("VISUAL_MIN_CONF", 0.5),
-		DetectorToken:      getenv("DETECTOR_TOKEN", ""),
-		SnapshotDir:        getenv("SNAPSHOT_DIR", "../data/snapshots"),
+		ServerAddr:           getenv("SERVER_ADDR", ":8080"),
+		GinMode:              getenv("GIN_MODE", "debug"),
+		MongoURI:             getenv("MONGO_URI", "mongodb://localhost:27017"),
+		MongoDB:              getenv("MONGO_DB", "drone_detect_app"),
+		ExportBackend:        getenv("EXPORT_BACKEND", "csv"),
+		GoogleCredsFile:      getenv("GOOGLE_CREDENTIALS_FILE", ""),
+		GoogleSheetID:        getenv("GOOGLE_SHEET_ID", ""),
+		ExportBatchSize:      getenvInt("EXPORT_BATCH_SIZE", 50),
+		ExportFlushSeconds:   getenvInt("EXPORT_FLUSH_SECONDS", 5),
+		AlertOnAuthorized:    getenvBool("ALERT_ON_AUTHORIZED", false),
+		AlertToken:           getenv("ALERT_TOKEN", ""),
+		AlertQueueSize:       getenvInt("ALERT_QUEUE_SIZE", 64),
+		ExportIdentifiedOnly: getenvBool("EXPORT_IDENTIFIED_ONLY", true),
+		BeaconWindowS:        getenvFloat("BEACON_WINDOW_S", 3),
+		BeaconRetentionS:     getenvFloat("BEACON_RETENTION_S", 60),
+		ResolveGraceMS:       getenvInt("RESOLVE_GRACE_MS", 1500),
+		VisualMinConf:        getenvFloat("VISUAL_MIN_CONF", 0.5),
+		DetectorToken:        getenv("DETECTOR_TOKEN", ""),
+		SnapshotDir:          getenv("SNAPSHOT_DIR", "../data/snapshots"),
 	}
 }

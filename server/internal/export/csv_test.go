@@ -23,7 +23,7 @@ func TestCSVHeaderAndRows(t *testing.T) {
 		Row(testDoc("e2"), nil, ""),
 	}
 	require.NoError(t, exp.Append(context.Background(), rows))
-	// Append again: the header must not repeat.
+	// Header must not repeat.
 	require.NoError(t, exp.Append(context.Background(), rows[:1]))
 	require.NoError(t, exp.Append(context.Background(), nil))
 
@@ -58,7 +58,7 @@ func TestCSVDayRotation(t *testing.T) {
 }
 
 func TestCSVBadDir(t *testing.T) {
-	// A path through a regular file cannot become a directory.
+	// A file path cannot become a directory.
 	f := filepath.Join(t.TempDir(), "file")
 	require.NoError(t, os.WriteFile(f, []byte("x"), 0o644))
 	_, err := NewCSVExporter(filepath.Join(f, "exports"))

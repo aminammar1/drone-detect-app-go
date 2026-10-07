@@ -1,5 +1,4 @@
-// CSV export: the EXPORT_BACKEND=csv sink and the Sheets failure fallback.
-// One file per day: <dir>/detections-YYYY-MM-DD.csv with a header row.
+// CSV is the csv backend and the Sheets fallback; one file per day.
 package export
 
 import (
@@ -13,18 +12,15 @@ import (
 	"time"
 )
 
-// CSVExporter appends rows to daily CSV files, creating them (with header)
-// on first use. It is also the fallback sink when Sheets appends fail.
+// CSVExporter appends to daily files, creating with header on first use.
 type CSVExporter struct {
-	// Dir is data/exports (relative to the server working directory).
+	// Dir is the export directory.
 	Dir string
-	// Now reports the current time; tests inject a fixed clock to check
-	// day rotation.
+	// Now is injectable for day-rotation tests.
 	Now func() time.Time
 }
 
-// NewCSVExporter creates the export directory if needed. It needs no Google
-// setup, so EXPORT_BACKEND=csv always works.
+// NewCSVExporter ensures dir exists; needs no Google setup.
 func NewCSVExporter(dir string) (*CSVExporter, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("csv export dir %q: %w", dir, err)
@@ -32,7 +28,7 @@ func NewCSVExporter(dir string) (*CSVExporter, error) {
 	return &CSVExporter{Dir: dir, Now: time.Now}, nil
 }
 
-// Append adds rows to today's file, writing the header for a new file.
+// Append adds rows to today's file, writing the header once.
 func (e *CSVExporter) Append(ctx context.Context, rows [][]any) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -71,8 +67,7 @@ func (e *CSVExporter) Append(ctx context.Context, rows [][]any) error {
 	return nil
 }
 
-// cell stringifies one row value for CSV. Numbers stay plain (no quotes
-// unless the csv package needs them); times are RFC 3339 UTC.
+// cell stringifies for CSV; times are RFC3339 UTC.
 func cell(v any) string {
 	switch t := v.(type) {
 	case nil:

@@ -12,15 +12,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
-	"drone-detect-app/server/internal/authz"
+	"drone-detect-app/server/internal/authorization"
 	"drone-detect-app/server/internal/identity"
 	"drone-detect-app/server/internal/model"
 	"drone-detect-app/server/internal/notify"
 	"drone-detect-app/server/internal/store"
 )
 
-// Wire timing (DESCRIPTION.md section 3.6): ping every 30 s, dead after
-// 60 s without a pong (read deadline refreshed on every pong).
+// Timing per DESCRIPTION.md section 3.6; pong refreshes the read deadline.
 const (
 	writeWait  = 10 * time.Second
 	pongWait   = 60 * time.Second
@@ -30,7 +29,7 @@ const (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	// Python clients send no Origin; browsers must be same-host.
+	// No Origin (Python) passes; browsers must be same-host.
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		return origin == "" || r.Host == stripScheme(origin)
@@ -52,26 +51,34 @@ func stripScheme(origin string) string {
 	return origin
 }
 
-// DetectorDeps wires the /ws/detector pipeline. No globals.
+// DetectorDeps injects the detector pipeline; no globals.
 type DetectorDeps struct {
 	Logger            *slog.Logger
 	Detections        store.Detections
 	Owners            store.Owners
 	Resolver          identity.Resolver
-	Decider           *authz.Decider
+	Decider           *authorization.Decider
 	Hub               *Hub
 	DetectorToken     string
 	AlertOnAuthorized bool
-	// Notifier, when set, receives every broadcast alert (console, Telegram).
-	// It runs in a goroutine and must never block the ack path.
+	// ExportIdentifiedOnly queues only identified drones for Sheets/CSV.
+	// MongoDB still stores every detection; resends skip the queue.
+	ExportIdentifiedOnly bool
+	// Notifier gets every broadcast; must never block acks.
 	Notifier notify.Notifier
-	// OnStored, when set, receives each newly stored detection (e.g. the
-	// export worker's Enqueue). It must not block; resends do not trigger it.
+	// OnStored runs per new row; resends skip it, never block.
 	OnStored func(*model.StoredDetection)
 }
 
-// DetectorHandler upgrades the connection and serves one detector.
-// Exactly one writer goroutine owns all conn writes via send.
+// ShouldEnqueueExport reports whether a stored row goes to the export queue.
+func ShouldEnqueueExport(result string, identifiedOnly bool) bool {
+	if !identifiedOnly {
+		return true
+	}
+	return result == model.IdentityIdentified
+}
+
+// DetectorHandler serves one detector; single writer owns conn writes.
 func DetectorHandler(deps DetectorDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.DetectorToken != "" && c.GetHeader("X-Detector-Token") != deps.DetectorToken {
@@ -86,8 +93,7 @@ func DetectorHandler(deps DetectorDeps) gin.HandlerFunc {
 		s := &detectorSession{deps: deps, conn: conn, send: make(chan []byte, 16)}
 		go s.writePump()
 		s.readPump()
-		// readPump returned (peer gone): unblock writePump immediately so
-		// the goroutine does not linger until the next ping.
+		// Peer gone: unblock writer so it doesn't linger to the next ping.
 		close(s.send)
 	}
 }
@@ -100,7 +106,7 @@ type detectorSession struct {
 
 func (s *detectorSession) readPump() {
 	defer s.conn.Close()
-	s.conn.SetReadLimit(1 << 20) // 1 MiB per frame is plenty for an event
+	s.conn.SetReadLimit(1 << 20) // 1 MiB caps one event frame.
 	_ = s.conn.SetReadDeadline(time.Now().Add(pongWait))
 	s.conn.SetPongHandler(func(string) error {
 		return s.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -108,7 +114,7 @@ func (s *detectorSession) readPump() {
 	for {
 		_, raw, err := s.conn.ReadMessage()
 		if err != nil {
-			return // idle timeout, protocol error, or client gone
+			return // Any read error ends the session.
 		}
 		s.handle(raw)
 	}
@@ -149,7 +155,7 @@ func (s *detectorSession) sendJSON(v interface{}) {
 	select {
 	case s.send <- raw:
 	default:
-		// Detector is not reading; drop the reply rather than block.
+		// Never block on an unread detector.
 		s.deps.Logger.Warn("detector send buffer full, dropping reply")
 	}
 }
@@ -158,8 +164,7 @@ func (s *detectorSession) sendError(eventID, code, msg string) {
 	s.sendJSON(model.ErrorMsg{Type: model.MsgError, EventID: eventID, Code: code, Message: msg})
 }
 
-// handle processes one inbound frame. It never crashes the connection:
-// invalid input gets an "error" reply and the loop continues (FR-S5).
+// handle answers invalid input with error and continues (FR-S5).
 func (s *detectorSession) handle(raw []byte) {
 	var env model.Envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
@@ -186,11 +191,11 @@ func (s *detectorSession) handle(raw []byte) {
 	s.process(ctx, &det)
 }
 
-// process runs resolve -> decide -> persist -> ack -> alert for one event.
+// process is resolve->decide->persist->ack->alert.
 func (s *detectorSession) process(ctx context.Context, det *model.Detection) {
 	log := s.deps.Logger.With("event_id", det.EventID)
 
-	// Idempotency: a resent event returns the stored decision, no duplicate.
+	// Resends return the stored decision.
 	if prev, err := s.deps.Detections.FindByEventID(ctx, det.EventID); err == nil {
 		s.sendJSON(ackFromStored(prev))
 		return
@@ -237,7 +242,7 @@ func (s *detectorSession) process(ctx context.Context, det *model.Detection) {
 	}
 	if err := s.deps.Detections.Insert(ctx, stored); err != nil {
 		if isDuplicateKey(err) {
-			// Lost a concurrent insert race: answer from the winner.
+			// Lost insert race: answer from the winner.
 			if prev, ferr := s.deps.Detections.FindByEventID(ctx, det.EventID); ferr == nil {
 				s.sendJSON(ackFromStored(prev))
 				return
@@ -249,7 +254,7 @@ func (s *detectorSession) process(ctx context.Context, det *model.Detection) {
 	}
 
 	s.sendJSON(ack)
-	if s.deps.OnStored != nil {
+	if s.deps.OnStored != nil && ShouldEnqueueExport(ack.Identity.Result, s.deps.ExportIdentifiedOnly) {
 		s.deps.OnStored(stored)
 	}
 	if ack.Decision != model.DecisionAuthorized || s.deps.AlertOnAuthorized {
@@ -262,7 +267,7 @@ func (s *detectorSession) process(ctx context.Context, det *model.Detection) {
 		}
 		s.deps.Hub.Broadcast(alert)
 		if s.deps.Notifier != nil {
-			// Best-effort: never block the ack path on a slow sink.
+			// Never block acks on notify.
 			go func(a *model.Alert) {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
@@ -274,7 +279,7 @@ func (s *detectorSession) process(ctx context.Context, det *model.Detection) {
 	}
 }
 
-// owneredDrone attaches the owner name for ack/alert display.
+// owneredDrone attaches the owner name.
 func owneredDrone(ctx context.Context, owners store.Owners, drone *model.Drone, log *slog.Logger) *model.DroneInfo {
 	if drone == nil {
 		return nil
@@ -294,7 +299,7 @@ func owneredDrone(ctx context.Context, owners store.Owners, drone *model.Drone, 
 	return info
 }
 
-// ackFromStored rebuilds the ack for a resent event_id.
+// ackFromStored rebuilds the ack for a resend.
 func ackFromStored(prev *model.StoredDetection) model.Ack {
 	return model.Ack{
 		Type: model.MsgAck, EventID: prev.EventID,
@@ -303,7 +308,7 @@ func ackFromStored(prev *model.StoredDetection) model.Ack {
 	}
 }
 
-// isDuplicateKey reports a unique-index violation (event_id resend race).
+// isDuplicateKey reports event_id resend races.
 func isDuplicateKey(err error) bool {
 	var wex interface{ HasErrorLabel(string) bool }
 	if errors.As(err, &wex) {

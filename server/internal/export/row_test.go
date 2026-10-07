@@ -43,11 +43,11 @@ func testDrone() *model.Drone {
 
 func TestColumnsExactOrder(t *testing.T) {
 	require.Len(t, Columns, 20)
-	require.Equal(t, "detected_at", Columns[0])
-	require.Equal(t, "identity_method", Columns[8])
-	require.Equal(t, "airframe_type_seen", Columns[14])
-	require.Equal(t, "airframe_type_registered", Columns[15])
-	require.Equal(t, "snapshot_path", Columns[19])
+	require.Equal(t, "Time", Columns[0])
+	require.Equal(t, "Method", Columns[8])
+	require.Equal(t, "Seen", Columns[14])
+	require.Equal(t, "Registered", Columns[15])
+	require.Equal(t, "Snapshot", Columns[19])
 }
 
 func TestRowFull(t *testing.T) {
@@ -55,7 +55,7 @@ func TestRowFull(t *testing.T) {
 	got := Row(testDoc("e1"), drone, "Amira Haddad")
 	require.Len(t, got, len(Columns))
 	require.Equal(t, []any{
-		"2026-06-09T14:03:22Z",
+		"2026-06-09 14:03:22",
 		"e1",
 		"north-gate",
 		"cam-01",
@@ -84,7 +84,7 @@ func TestRowNoDroneNoVisual(t *testing.T) {
 	doc.Drone = nil
 	got := Row(doc, nil, "Ghost")
 	require.Len(t, got, len(Columns))
-	// Identity and event fields stay; every registration-derived cell is empty.
+	// Registration cells stay empty when unidentified.
 	require.Equal(t, "beacon+visual", got[8])
 	for _, i := range []int{9, 10, 11, 12, 13, 14, 15, 16, 17, 18} {
 		require.Equal(t, "", got[i], "column %s", Columns[i])

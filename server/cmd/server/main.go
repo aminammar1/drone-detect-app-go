@@ -94,16 +94,17 @@ func main() {
 	go worker.Run(exportCtx)
 	router := api.NewRouter(logger, api.Handlers{
 		Detector: ws.DetectorHandler(ws.DetectorDeps{
-			Logger:            logger,
-			Detections:        repos,
-			Owners:            repos,
-			Resolver:          resolver,
-			Decider:           decider,
-			Hub:               hub,
-			DetectorToken:     cfg.DetectorToken,
-			AlertOnAuthorized: cfg.AlertOnAuthorized,
-			Notifier:          notifier,
-			OnStored:          worker.Enqueue,
+			Logger:               logger,
+			Detections:           repos,
+			Owners:               repos,
+			Resolver:             resolver,
+			Decider:              decider,
+			Hub:                  hub,
+			DetectorToken:        cfg.DetectorToken,
+			AlertOnAuthorized:    cfg.AlertOnAuthorized,
+			ExportIdentifiedOnly: cfg.ExportIdentifiedOnly,
+			Notifier:             notifier,
+			OnStored:             worker.Enqueue,
 		}),
 		Beacons: ws.BeaconsHandler(ws.BeaconDeps{Logger: logger, Buffer: beacons}),
 		Alerts: ws.AlertsHandlerWithDeps(ws.AlertsDeps{

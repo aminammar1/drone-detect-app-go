@@ -17,8 +17,7 @@ import (
 	"drone-detect-app/server/internal/model"
 )
 
-// scriptExporter is a fake Exporter: it records batch sizes and fails the
-// first failLeft calls. No Google calls.
+// scriptExporter fails the first failLeft Appends; no network.
 type scriptExporter struct {
 	mu       sync.Mutex
 	batches  []int
@@ -44,7 +43,7 @@ func (f *scriptExporter) snapshot() (batches []int, total int) {
 	return append([]int(nil), f.batches...), f.total
 }
 
-// fakeStore implements ExportStore, DroneLookup and OwnerLookup in memory.
+// fakeStore is an in-memory ExportStore/DroneLookup/OwnerLookup.
 type fakeStore struct {
 	mu       sync.Mutex
 	statuses map[string]string
@@ -129,7 +128,7 @@ func TestWorkerBatchesBySize(t *testing.T) {
 	for _, id := range []string{"e1", "e2", "e3", "e4", "e5"} {
 		w.Enqueue(testDoc(id))
 	}
-	// Two full batches flush by size; the leftover flushes on shutdown.
+	// Leftovers flush on shutdown.
 	require.Eventually(t, func() bool {
 		_, total := primary.snapshot()
 		return total == 4
@@ -156,7 +155,7 @@ func TestWorkerFailureFallbackRetry(t *testing.T) {
 	})
 
 	w.Enqueue(testDoc("e1"))
-	// Failure path: CSV fallback written, status failed...
+	// Failure writes CSV fallback and marks failed...
 	require.Eventually(t, func() bool { return st.status("e1") == StatusFailed },
 		3*time.Second, 10*time.Millisecond)
 	entries, err := os.ReadDir(fallback.Dir)
@@ -165,7 +164,7 @@ func TestWorkerFailureFallbackRetry(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(fallback.Dir, entries[0].Name()))
 	require.NoError(t, err)
 	require.Contains(t, string(raw), "e1")
-	// ...then the retry succeeds and the status flips to exported.
+	// ...retry then marks exported.
 	require.Eventually(t, func() bool { return st.status("e1") == StatusExported },
 		3*time.Second, 10*time.Millisecond)
 	_, total := primary.snapshot()
@@ -195,13 +194,13 @@ func TestWorkerRequeueOnStartup(t *testing.T) {
 
 func TestWorkerEnrichmentFailureStillExports(t *testing.T) {
 	primary := &scriptExporter{}
-	st := &fakeStore{} // no drone/owner: lookups return nil, nil
+	st := &fakeStore{} // No drone/owner; lookups return nil.
 	w, _ := runWorker(t, Deps{
 		Logger: testLogger(), Primary: primary,
 		Detections: st, Drones: st, Owners: st,
 		BatchSize: 10, FlushInterval: 20 * time.Millisecond,
 	})
-	doc := testDoc("e1") // doc.Drone set, but the registry has no such drone
+	doc := testDoc("e1") // Claimed but unregistered.
 	w.Enqueue(doc)
 	require.Eventually(t, func() bool { return st.status("e1") == StatusExported },
 		3*time.Second, 10*time.Millisecond)

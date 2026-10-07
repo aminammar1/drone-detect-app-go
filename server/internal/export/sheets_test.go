@@ -7,9 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Only constructor failure paths are tested here: building the client is
-// lazy, but a missing sheet ID or an unreadable key file must fail fast
-// without any network call.
+// Constructor must fail fast without network.
 func TestSheetsRequiresSheetID(t *testing.T) {
 	_, err := NewSheetsExporter(context.Background(), "", "")
 	require.ErrorContains(t, err, "GOOGLE_SHEET_ID")
@@ -20,9 +18,7 @@ func TestSheetsBadCredentialsFile(t *testing.T) {
 	require.Error(t, err)
 }
 
-// The append range must stay valid A1 notation (tab + columns) and span
-// exactly len(Columns). A bare sheet name failed live with
-// "Unable to parse range: detections" (400); this test locks the fix.
+// Bare sheet names 400; range must span len(Columns).
 func TestSheetsRangeCoversColumns(t *testing.T) {
 	require.Contains(t, detectionsRange, "!")
 	require.True(t, len(detectionsRange) > 3)

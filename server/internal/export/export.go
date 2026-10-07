@@ -1,34 +1,28 @@
-// Package export appends one row per detection to a Google Sheet, with a
-// local CSV fallback (DESCRIPTION.md section 7). A background Worker batches
-// stored detections up to EXPORT_BATCH_SIZE rows or every EXPORT_FLUSH_SECONDS
-// and tracks progress in MongoDB via export_status (pending/exported/failed).
+// Package export appends rows to Sheets with CSV fallback; DESCRIPTION.md section 7.
 package export
 
 import (
 	"context"
 	"strconv"
-	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"drone-detect-app/server/internal/model"
 )
 
-// Export statuses stored on detections (DESCRIPTION.md section 2).
+// Export statuses mirror detections.export_status; DESCRIPTION.md section 2.
 const (
 	StatusPending  = "pending"
 	StatusExported = "exported"
 	StatusFailed   = "failed"
 )
 
-// Exporter appends a batch of rows to one sink (a sheet tab or a CSV file).
-// Implementations must be safe for use by the worker's single goroutine;
-// Append honors ctx cancellation.
+// Exporter appends a batch; single-goroutine use, honors cancellation.
 type Exporter interface {
 	Append(ctx context.Context, rows [][]any) error
 }
 
-// DroneLookup resolves a registration by serial for row enrichment.
+// DroneLookup resolves a serial for row enrichment.
 type DroneLookup interface {
 	FindBySerial(ctx context.Context, serial string) (*model.Drone, error)
 }
@@ -38,41 +32,40 @@ type OwnerLookup interface {
 	FindByID(ctx context.Context, id bson.ObjectID) (*model.Owner, error)
 }
 
-// ExportStore is the worker's narrow MongoDB surface: progress tracking and
-// startup re-queue.
+// ExportStore tracks progress and requeues unfinished exports.
 type ExportStore interface {
 	FindUnexported(ctx context.Context, limit int) ([]*model.StoredDetection, error)
 	SetExportStatus(ctx context.Context, eventID, status string) error
 }
 
-// Columns is the exact sheet column order (DESCRIPTION.md section 7).
-// Change it only together with that section.
+// Columns is the sheet order; keep in sync with DESCRIPTION.md section 7.
 var Columns = []string{
-	"detected_at",
-	"event_id",
-	"zone_id",
-	"source_id",
-	"track_id",
-	"confidence",
-	"decision",
-	"reason",
-	"identity_method",
-	"serial_number",
-	"manufacturer",
-	"model",
-	"model_version",
-	"model_family",
-	"airframe_type_seen",
-	"airframe_type_registered",
-	"category",
-	"owner_name",
-	"year_sold",
-	"snapshot_path",
+	"Time",
+	"Event",
+	"Zone",
+	"Camera",
+	"Track",
+	"Conf",
+	"Decision",
+	"Reason",
+	"Method",
+	"Serial",
+	"Maker",
+	"Model",
+	"Version",
+	"Family",
+	"Seen",
+	"Registered",
+	"Category",
+	"Owner",
+	"Sold",
+	"Snapshot",
 }
 
-// Row builds one export row in Columns order. drone may be nil (no unique
-// drone identified); ownerName is "" when the owner is unknown. Native types
-// are kept (Sheets receives numbers, the CSV writer stringifies them).
+// humanTime is UTC; Sheets parses it as datetime.
+const humanTime = "2006-01-02 15:04:05"
+
+// Row builds a Columns-ordered row; nil drone yields empty registration cells.
 func Row(doc *model.StoredDetection, drone *model.Drone, ownerName string) []any {
 	row := make([]any, 0, len(Columns))
 	seen := ""
@@ -93,7 +86,7 @@ func Row(doc *model.StoredDetection, drone *model.Drone, ownerName string) []any
 		ownerName = ""
 	}
 	return append(row,
-		doc.DetectedAt.UTC().Format(time.RFC3339),
+		doc.DetectedAt.UTC().Format(humanTime),
 		doc.EventID,
 		doc.ZoneID,
 		doc.Source.ID,
