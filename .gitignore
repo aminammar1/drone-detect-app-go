@@ -9,8 +9,10 @@ secrets/
 *.onnx
 *.engine
 
-# Runtime data (snapshots, CSV exports)
-data/
+# Server-local runtime dir (snapshots fallback) - never commit
+server/data/
+
+
 
 # Input media content (provided by owner, read-only) — keep the folders, ignore the files
 videos/*
