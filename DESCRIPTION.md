@@ -16,8 +16,8 @@ Do not copy version numbers into other files.
   The project's own input data lives in **`videos/`** (videos) and **`images/`** (images) at the repo root (see section 12). A folder passed to `--source` is scanned for supported files and processed in name order.
 - **FR-D2** Run YOLO inference with configurable weights path, confidence threshold, and image size.
 - **FR-D3** Track detected drones across frames and assign a stable `track_id` (per run only; never an identity).
-- **FR-D4** Emit **one** `detection` event per new track, and re-emit only after a configurable cooldown (default 30 s) if the same track is still visible.
-- **FR-D5** Save a cropped or annotated snapshot to `data/snapshots/` and include the path in the event.
+- **FR-D4** Video files emit **one summary** `detection` event per confirmed track at end of footage (best-confidence frame; tracks seen in fewer than `TRACK_MIN_FRAMES` frames never emit). Streams (webcam/RTSP, which never end) keep the live path: one event per new track, re-emit after `TRACK_COOLDOWN_SECONDS` (default 30 s).
+- **FR-D5** Save an annotated snapshot to `data/snapshots/<session-date>/` (wall-clock run date, not event time) and include the path in the event. Snapshots whose server ack does not confirm `identity.result == identified` are deleted after the run; only identified drones keep snapshots and sheet rows.
 - **FR-D6** Maintain a WebSocket connection with automatic reconnect (exponential backoff). Buffer events in a bounded in-memory queue while disconnected.
 - **FR-D7** Time basis: `--clock video` sets `detected_at = scenario_start + position_in_video` (deterministic replay); `--clock wall` uses the real clock (live camera).
 - **FR-D8** Optionally attach `visual` attributes (`airframe_type`, `model_family` with confidences) when a classifier is available. Omit the field otherwise.
@@ -28,7 +28,7 @@ Do not copy version numbers into other files.
 - **FR-S1** `GET /ws/detector` — WebSocket for detectors (events up, acks down).
 - **FR-S2** `GET /ws/beacons` — WebSocket for Remote ID beacon sources (simulator now, real receiver later).
 - **FR-S3** `GET /ws/alerts` — WebSocket for live alert clients.
-- **FR-S4** `GET /healthz`.
+- **FR-S4** `GET /health` (`GET /healthz` kept as a legacy alias).
 - **FR-S5** Validate every incoming message (schema, required fields, confidence in [0, 1]). Reject invalid ones with an `error` message; never crash. Gin `Recovery` middleware is mandatory.
 - **FR-S6** Keep a **beacon buffer** keyed by event time, with retention `BEACON_RETENTION_S`.
 - **FR-S7** Run the **Identity Resolver** (section 4) and then the **decision logic** (section 5) for each detection.
@@ -317,9 +317,12 @@ unregistered serial.
 
 ## 7. Google Sheets export
 
-**Approach:** one spreadsheet, one worksheet `detections`, append one row per detection.
+**Approach:** one spreadsheet, one worksheet `detections`, append one row per exported detection.
 Create the `detections` tab first (exact name): the API never creates tabs,
 and appends fail with `400 Unable to parse range` until it exists.
+Only server-confirmed identified drones are queued for export while
+`EXPORT_IDENTIFIED_ONLY=true` (default). MongoDB still stores every detection
+(audit trail, idempotent resends); only the sheet/CSV stream is filtered.
 
 - Auth: a **Google Cloud service account** with the Sheets API enabled; share the spreadsheet with the service account email (Editor). Two supported modes, chosen by configuration:
   - **Keyless (default recommendation):** `GOOGLE_CREDENTIALS_FILE` is empty; the server uses **Application Default Credentials** (`sheets.NewService(ctx, option.WithScopes(sheets.SpreadsheetsScope))`). For local development the developer runs `gcloud auth application-default login --impersonate-service-account=<SA_EMAIL>`. Works in organizations that enforce `iam.disableServiceAccountKeyCreation`.
@@ -330,8 +333,12 @@ and appends fail with `400 Unable to parse range` until it exists.
 - On failure: write rows to `data/exports/detections-YYYY-MM-DD.csv`, set `export_status = failed`, retry with backoff, set `exported` on success.
 - On startup: re-queue detections with `export_status` `pending` or `failed`.
 
-**Columns (in order):**
-`detected_at, event_id, zone_id, source_id, track_id, confidence, decision, reason, identity_method, serial_number, manufacturer, model, model_version, model_family, airframe_type_seen, airframe_type_registered, category, owner_name, year_sold, snapshot_path`
+**Columns (in order, short human headers):**
+`Time, Event, Zone, Camera, Track, Conf, Decision, Reason, Method, Serial, Maker, Model, Version, Family, Seen, Registered, Category, Owner, Sold, Snapshot`
+
+`Time` is `YYYY-MM-DD HH:MM:SS` UTC (Sheets parses it as a datetime). The server
+writes the header row once and formats it (bold, frozen top row, filter), so the
+sheet reads as a table. Same headers in CSV fallback.
 
 **Why not one CSV per detection on Drive?** It clutters Drive and is slow; appending to a single Drive CSV means download-edit-reupload (race conditions).
 Sheets handles concurrent appends and filtering natively.
@@ -353,6 +360,7 @@ GOOGLE_CREDENTIALS_FILE=
 GOOGLE_SHEET_ID=
 EXPORT_BATCH_SIZE=50
 EXPORT_FLUSH_SECONDS=5
+EXPORT_IDENTIFIED_ONLY=true
 ALERT_ON_AUTHORIZED=false
 ALERT_TOKEN=
 ALERT_QUEUE_SIZE=64
@@ -372,6 +380,8 @@ YOLO_IMGSZ=640
 ZONE_ID=north-gate
 SOURCE_ID=cam-01
 TRACK_COOLDOWN_SECONDS=30
+TRACK_MIN_FRAMES=3
+YOLO_STRIDE=1
 SNAPSHOT_DIR=./data/snapshots
 VIDEOS_DIR=./videos
 IMAGES_DIR=./images

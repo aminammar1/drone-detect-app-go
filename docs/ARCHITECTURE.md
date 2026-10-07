@@ -126,10 +126,10 @@ drone-detect-app/
   server/cmd/server       wiring (config, Mongo, hub, worker, notifier, routes)
   server/internal/ws      /ws/detector, /ws/beacons, /ws/alerts + hub
   server/internal/identity  beacon buffer + resolver (explicit/beacon/visual)
-  server/internal/authz    decision engine (order in DESCRIPTION.md 5)
+  server/internal/authorization  decision engine (order in DESCRIPTION.md 5)
   server/internal/export  Sheets append + CSV fallback + retry worker
   server/internal/notify  console notifier (best-effort, never blocks)
-  server/internal/api     GET / dashboard, GET /healthz, /snapshots static
+  server/internal/api     GET / dashboard, GET /health (/healthz alias), /snapshots static
   tools/                  seed_db.py, fake_detector.py, remote_id_sim.py
   docs/                   TRAINING.md (this milestone), ARCHITECTURE.md
 ```

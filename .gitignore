@@ -36,3 +36,6 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Agent tooling dependencies (skills themselves are committed)
+.opencode/node_modules/

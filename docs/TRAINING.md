@@ -41,6 +41,13 @@ names:
 
 Rules:
 
+- Recommended base (verified 2026-10-07): `lgrzybowski/seraphim-drone-detection-dataset`
+  on Hugging Face — 75k train / 8k test, YOLO format, single `drone` class,
+  CC BY 4.0 (attribute the source datasets). It aggregates 23 open sets, so
+  you skip format conversion. For hard negatives and Stage B airframes, add a
+  subset of `Drones Comprehensive Merged` (Roboflow Universe, 101k, includes
+  bird/airplane/helicopter + Fixed-Wing/Multi-Rotor labels) — clean its 9
+  overlapping names down to our enum first.
 - Sources: public drone sets (Roboflow Universe, Kaggle drone sets). Keep the
   license note from PROJECT.md 2 (AGPL-3.0 for Ultralytics).
 - Drones are small: keep high-res frames, prefer `imgsz` 960–1280 or tiling
@@ -99,7 +106,9 @@ m.train(data='../datasets/family', epochs=50, imgsz=224, name='family26n-cls')
 
 Notes:
 
-- `batch=-1` lets Ultralytics pick what fits your VRAM/RAM.
+- `batch=-1` lets Ultralytics pick what fits your VRAM/RAM. On a 4 GB card
+  (e.g. GTX 1650 Max-Q) use `batch=8`, `imgsz=640` for the smoke run; `imgsz=960`
+  may OOM — stay at 640 if so, or train the full run on Colab (A100/L4).
 - Small data? Start `epochs=20` as a smoke test, then 100+.
 - Resume: `YOLO('runs/detect/drone26n/weights/last.pt').train(resume=True)`.
 

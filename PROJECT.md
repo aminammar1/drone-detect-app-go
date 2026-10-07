@@ -176,15 +176,15 @@ flowchart TD
 |---|---|---|---|---|---|
 | 1 | Read | `detector/sources.py` | image / video / stream | frame + timestamp | Skip frame, log; stop at end of source |
 | 2 | Detect | `detector/detect.py` | frame | bounding boxes + confidence | Log and continue |
-| 3 | Track + dedupe | `detector/tracking.py` | boxes | `track_id`, "emit now?" flag | Never emit without a `track_id` |
-| 4 | Visual attributes | `detector/attributes.py` | crop of the box | `airframe_type`, `model_family` + confidences (optional) | Omit `visual` (resolver skips the cross-check) |
-| 5 | Event | `detector/events.py`, `ws_client.py` | all of the above | `detection` JSON over WebSocket | Buffer in bounded queue, reconnect with backoff |
+| 3 | Track + summarize | `detector/tracking.py` | boxes | `track_id`, best frame per track | Files: one summary per confirmed track at end; streams: "emit now?" flag |
+| 4 | Visual attributes | `detector/attributes.py` | crop of the best box | `airframe_type`, `model_family` + confidences (optional) | Omit `visual` (resolver skips the cross-check) |
+| 5 | Event | `detector/events.py`, `ws_client.py` | best frame per track | `detection` JSON over WebSocket | Buffer in bounded queue, reconnect with backoff; snapshots pruned unless ack says `identified` |
 | 6 | Beacons | `tools/remote_id_sim.py` | scenario file | `beacon` JSON over WebSocket | Reconnect; beacons are not persisted |
 | 7 | Resolve identity | `server/internal/identity` | detection + beacon buffer + DB | identity result | Unknown or ambiguous becomes `unidentified` |
-| 8 | Decide | `server/internal/authz` | identity + zone + time | decision + reason | Any error becomes `unidentified` + logged, never a crash |
+| 8 | Decide | `server/internal/authorization` | identity + zone + time | decision + reason | Any error becomes `unidentified` + logged, never a crash |
 | 9 | Persist + reply | `server/internal/store`, `ws` | decision | stored detection, `ack` | Reply `error`, keep the connection |
 | 10 | Notify | `server/internal/notify` | decision | `alert` message | Slow clients are dropped, never block the pipeline |
-| 11 | Export | `server/internal/export` | stored detection | Sheet row, or CSV fallback | Retry with backoff, mark `export_status` |
+| 11 | Export | `server/internal/export` | stored detection | Sheet row, or CSV fallback | Identified only (`EXPORT_IDENTIFIED_ONLY`); retry with backoff, mark `export_status` |
 
 ---
 
@@ -196,7 +196,7 @@ flowchart TD
 | Detection vs. identification | **Separate problems** | YOLO can say "a drone is here"; it cannot read a serial number from pixels. See section 5. |
 | Transport | **WebSocket** (JSON) | Real-time, bidirectional (events up, acks down). |
 | Output sink | **One Google Sheet, append rows** (CSV fallback) | One file per detection on Drive is messy and slow. |
-| Dedupe | **Tracking + cooldown** | A drone visible for 10 s at 30 FPS would otherwise create about 300 events. |
+| Dedupe | **Tracking + end-of-file summary** (streams: cooldown) | A drone visible for 10 s at 30 FPS otherwise creates about 300 events; files now emit one summary per track. |
 | Sheets writes | **Batched** | Sheets API has per-minute write quotas. |
 | Time basis | **Event time** (`detected_at`, beacon `timestamp`), not arrival time | Replaying a video must give deterministic results. |
 | Weights | **Fine-tuned drone model (YOLO26)** | COCO-pretrained YOLO has no `drone` class. |
@@ -305,11 +305,11 @@ drone-detect-app/
 │   └── internal/
 │       ├── config/
 │       ├── model/             # shared structs
-│       ├── api/               # Gin router, middleware, /healthz
+│       ├── api/               # Gin router, middleware, /health
 │       ├── ws/                # /ws/detector, /ws/beacons, /ws/alerts
 │       ├── store/             # MongoDB repositories
 │       ├── identity/          # beacon buffer + resolver
-│       ├── authz/             # decision engine
+│       ├── authorization/     # decision engine
 │       ├── export/            # Sheets exporter + CSV fallback
 │       └── notify/
 ├── tools/
