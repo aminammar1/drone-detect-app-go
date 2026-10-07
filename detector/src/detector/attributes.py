@@ -1,14 +1,7 @@
-"""Stage C crop classifier for `visual.model_family` (PROJECT.md 5.4, optional).
+"""Crop classifier for visual.model_family (DESCRIPTION.md section 4).
 
-Ultralytics YOLO-cls (e.g. `yolo26n-cls.pt` fine-tuned on cropped drone boxes)
-predicts the model family (Mavic, Mini, Anafi, ...). It never identifies a
-unique drone: the family only disambiguates beacons or flags spoofing
-(DESCRIPTION.md section 4). Disabled by default; enable with
-ATTR_FAMILY_ENABLED=true once `detector/models/family.pt` exists.
-
-What labeled crops are needed is documented in `docs/TRAINING.md` (Stage C).
-A Hugging Face backbone is only a fallback — see that doc for when it is
-justified (YOLO-cls accuracy insufficient on your crops).
+Family disambiguates beacons or flags spoofing, never identity. Gated by
+ATTR_FAMILY_ENABLED; needs detector/models/family.pt (docs/TRAINING.md).
 """
 
 from __future__ import annotations
@@ -23,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class ClsModel(Protocol):
-    """Minimal YOLO-cls surface used by the classifier (real or fake in tests)."""
+    """YOLO-cls surface; faked in tests."""
 
     names: dict[int, str]
 
@@ -31,7 +24,7 @@ class ClsModel(Protocol):
 
 
 class ModelFamilyClassifier:
-    """Wraps a YOLO-cls family model. Load once, call per emitted crop."""
+    """YOLO-cls family model; load once, call per emitted crop."""
 
     def __init__(
         self,
@@ -47,7 +40,7 @@ class ModelFamilyClassifier:
             self._min_conf = min_conf
             return
         resolved = self._resolve(weights, repo_root)
-        from ultralytics import YOLO  # lazy: no cost when Stage C is off
+        from ultralytics import YOLO  # lazy: no cost when disabled
 
         logger.info("loading family classifier weights from %s", resolved)
         self._model = YOLO(str(resolved))
@@ -66,11 +59,7 @@ class ModelFamilyClassifier:
         )
 
     def predict_crop(self, crop_bgr: np.ndarray) -> tuple[str, float] | None:
-        """Classify one BGR crop. Returns (family, conf) or None.
-
-        None means "no opinion": empty/tiny crop, low confidence, or model
-        error. Callers then omit `model_family` but keep the airframe.
-        """
+        """(family, conf) or None; None means omit model_family, keep airframe."""
         if crop_bgr is None or crop_bgr.size == 0:
             return None
         h, w = crop_bgr.shape[:2]
@@ -78,7 +67,7 @@ class ModelFamilyClassifier:
             return None
         try:
             results = self._model.predict(crop_bgr, verbose=False)
-        except Exception as exc:  # noqa: BLE001 — best effort, never crash emit
+        except Exception as exc:  # noqa: BLE001 — best effort, never fail emit
             logger.warning("family classifier failed: %s", exc)
             return None
         best: tuple[str, float] | None = None
@@ -98,7 +87,7 @@ class ModelFamilyClassifier:
 
 
 def crop_box(frame_bgr: np.ndarray, bbox: tuple[float, float, float, float]) -> np.ndarray:
-    """Crop and clamp a box to the frame. Returns an empty array when invalid."""
+    """Clamped crop; empty array when invalid."""
     h, w = frame_bgr.shape[:2]
     x1, y1, x2, y2 = (int(v) for v in bbox)
     x1, y1 = max(0, x1), max(0, y1)

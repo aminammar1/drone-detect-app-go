@@ -1,9 +1,7 @@
-"""Reconnecting WebSocket client for detection events (FR-D6).
+"""Reconnecting sender for detection events (FR-D6).
 
-One connection, two tasks: a sender drains the bounded queue, a receiver logs
-acks/errors. Exponential backoff (1s doubling, 30s cap) on disconnects.
-Events sent but unacked are requeued on reconnect; the server is idempotent
-on `event_id`, so redelivery is safe.
+Bounded queue survives short outages. Backoff 1s doubling, 30s cap. Unacked
+events are requeued; server dedupes on event_id so redelivery is safe.
 """
 
 import asyncio
@@ -16,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class DetectorClient:
-    """Async sender with a bounded in-memory queue. Create, `run`, `submit`."""
+    """Async sender with a bounded in-memory queue."""
 
     def __init__(self, url: str, queue_size: int = 100) -> None:
         self._url = url
@@ -24,9 +22,11 @@ class DetectorClient:
         self._pending: dict[str, str] = {}
         self._run_task: asyncio.Task[None] | None = None
         self._stopping = False
+        # Last server reply per event_id (ack or error); drives snapshot pruning.
+        self.acks: dict[str, dict] = {}
 
     async def run(self) -> None:
-        """Maintain the connection until `close`. Never raises."""
+        """Hold the connection until close. Never raises."""
         backoff = 1.0
         while not self._stopping:
             try:
@@ -51,8 +51,7 @@ class DetectorClient:
                             raise task.exception()  # type: ignore[misc]
             except asyncio.CancelledError:
                 break
-            # Any transport failure (refused, reset, timeout, ...) must reconnect,
-            # so this is intentionally broad. noqa: BLE001
+            # Broad by design: any transport failure must reconnect. noqa: BLE001
             except Exception as exc:  # noqa: BLE001
                 self._requeue_pending()
                 if self._stopping:
@@ -63,7 +62,7 @@ class DetectorClient:
         logger.info("client stopped")
 
     async def submit(self, event_id: str, payload: str) -> None:
-        """Queue one event; drops the oldest queued event when full (logged)."""
+        """Queue one event; full queue drops the oldest (logged)."""
         try:
             self._queue.put_nowait((event_id, payload))
         except asyncio.QueueFull:
@@ -73,7 +72,7 @@ class DetectorClient:
             self._queue.put_nowait((event_id, payload))
 
     async def drain(self, timeout: float = 15.0) -> bool:
-        """Wait until everything queued is sent and acked. False on timeout."""
+        """Block until queued events are acked; False on timeout."""
         try:
             await asyncio.wait_for(self._queue.join(), timeout=timeout)
             async with asyncio.timeout(timeout):
@@ -89,13 +88,13 @@ class DetectorClient:
             return False
 
     async def close(self) -> None:
-        """Stop the run loop. Call after `drain`."""
+        """Stop the run loop; call after drain."""
         self._stopping = True
         if self._run_task is not None:
             self._run_task.cancel()
 
     def attach(self) -> asyncio.Task[None]:
-        """Start `run` in the background; keep the task to await on shutdown."""
+        """Start run in background; await the task on shutdown."""
         self._run_task = asyncio.create_task(self.run())
         return self._run_task
 
@@ -105,7 +104,7 @@ class DetectorClient:
             try:
                 await ws.send(payload)
             except Exception:
-                # Put it back at the head of the line; run() requeues the rest.
+                # Head of line; run() requeues the rest.
                 self._prepend(event_id, payload)
                 self._queue.task_done()
                 raise
@@ -123,6 +122,7 @@ class DetectorClient:
             kind = msg.get("type")
             if kind == "ack":
                 self._pending.pop(event_id, None)
+                self.acks[event_id] = msg
                 logger.info(
                     "ack event_id=%s decision=%s reason=%s",
                     event_id,
@@ -131,6 +131,7 @@ class DetectorClient:
                 )
             elif kind == "error":
                 self._pending.pop(event_id, None)
+                self.acks[event_id] = msg
                 logger.error(
                     "server rejected event_id=%s code=%s message=%s",
                     event_id,
@@ -141,7 +142,7 @@ class DetectorClient:
                 logger.warning("unexpected message type=%s event_id=%s", kind, event_id)
 
     def _requeue_pending(self) -> None:
-        """Move unacked events back to the queue after a disconnect."""
+        """Return unacked events to the queue after disconnect."""
         if not self._pending:
             return
         logger.warning("requeuing %d unacked events", len(self._pending))
@@ -154,7 +155,7 @@ class DetectorClient:
                 logger.error("dropping unacked event event_id=%s (queue full)", event_id)
 
     def _prepend(self, event_id: str, payload: str) -> None:
-        """Put one item back at the head of the queue (bounded: may drop oldest)."""
+        """Head-of-line requeue; may drop oldest when bounded."""
         items = [(event_id, payload)]
         while not self._queue.empty():
             items.append(self._queue.get_nowait())

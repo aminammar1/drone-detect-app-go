@@ -1,9 +1,4 @@
-"""Pydantic models for the detector -> server `detection` message.
-
-Field-for-field match with DESCRIPTION.md section 3.1. `visual` is omitted
-entirely in M3 (stage A in PROJECT.md 5.4: no attribute model yet); it becomes
-available when the airframe/model classifier lands.
-"""
+"""Detector -> server detection message. Field-for-field per DESCRIPTION.md section 3.1."""
 
 from datetime import datetime
 from typing import Literal
@@ -16,8 +11,6 @@ IdentifierKind = Literal["serial", "remote_id", "qr", "none"]
 
 
 class BBox(BaseModel):
-    """Pixel box, top-left (x1, y1) to bottom-right (x2, y2)."""
-
     model_config = ConfigDict(extra="forbid")
 
     x1: float = Field(ge=0)
@@ -35,7 +28,7 @@ class EventSource(BaseModel):
 
 
 class Identifier(BaseModel):
-    """Explicit identity. Absent identifier == {"kind": "none"} (FR-D9)."""
+    """Absent means {"kind": "none"} (FR-D9)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -44,7 +37,7 @@ class Identifier(BaseModel):
 
 
 class Visual(BaseModel):
-    """Soft visual evidence (FR-D8). Only attached when a classifier exists."""
+    """Soft evidence (FR-D8); attached only when a classifier exists."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -55,7 +48,7 @@ class Visual(BaseModel):
 
 
 class DetectionEvent(BaseModel):
-    """One `detection` frame on the detector WebSocket (DESCRIPTION 3.1)."""
+    """One detection frame on the detector socket (DESCRIPTION.md 3.1)."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -65,7 +58,7 @@ class DetectionEvent(BaseModel):
     source: EventSource
     zone_id: str = Field(min_length=1)
     track_id: int = Field(ge=0)
-    # `class` is reserved in Python; the wire name stays "class" via alias.
+    # class is reserved; wire name stays "class" via alias.
     class_name: str = Field(alias="class", min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
     bbox: BBox
@@ -77,11 +70,11 @@ class DetectionEvent(BaseModel):
     @field_validator("detected_at")
     @classmethod
     def _require_timezone(cls, value: datetime) -> datetime:
-        # Naive timestamps silently shift event-time matching on the server.
+        # Naive times break server event-time matching.
         if value.tzinfo is None:
             raise ValueError("detected_at must be timezone-aware (RFC 3339 UTC)")
         return value
 
     def to_json(self) -> str:
-        """Wire encoding: aliases (`class`), no nulls (visual omitted when None)."""
+        """Aliases applied, nulls dropped (visual omitted when None)."""
         return self.model_dump_json(by_alias=True, exclude_none=True)

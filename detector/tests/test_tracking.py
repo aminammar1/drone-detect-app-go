@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from detector.tracking import SystemClock, TrackDeduplicator
+from detector.tracking import SystemClock, TrackDeduplicator, TrackSummarizer
 
 START = datetime(2026, 6, 9, 14, 0, 0, tzinfo=UTC)
 COOLDOWN = timedelta(seconds=30)
@@ -88,3 +88,57 @@ def test_memory_stays_bounded() -> None:
     # and only the fresh one remains.
     dedupe.should_emit(9999, START + COOLDOWN + timedelta(seconds=1))
     assert dedupe.tracked_count == 1
+
+
+def _obs(track_id: int, conf: float, frame_index: int = 0) -> dict:
+    return {
+        "track_id": track_id,
+        "class_name": "drone",
+        "confidence": conf,
+        "bbox": (0.0, 0.0, 10.0, 10.0),
+        "frame": object(),
+        "frame_index": frame_index,
+        "detected_at": START + timedelta(seconds=frame_index / 30),
+    }
+
+
+def test_summarizer_keeps_best_confidence_frame() -> None:
+    summ = TrackSummarizer(min_frames=2)
+    o1 = _obs(7, 0.40, 0)
+    o2 = _obs(7, 0.91, 5)
+    o3 = _obs(7, 0.60, 9)
+    summ.update(o1.pop("track_id"), **o1)
+    summ.update(o2.pop("track_id"), **o2)
+    summ.update(o3.pop("track_id"), **o3)
+    (ready,) = summ.confirmed()
+    assert ready.track_id == 7
+    assert ready.confidence == pytest.approx(0.91)
+    assert ready.frame_index == 5
+    assert ready.frames_seen == 3
+
+
+def test_summarizer_drops_tracks_below_min_frames() -> None:
+    summ = TrackSummarizer(min_frames=3)
+    for i in range(2):
+        obs = _obs(1, 0.9, i)
+        summ.update(obs.pop("track_id"), **obs)
+    obs = _obs(2, 0.5, 0)
+    summ.update(obs.pop("track_id"), **obs)
+    assert [t.track_id for t in summ.confirmed()] == []
+    assert summ.tracked_count == 2
+
+
+def test_summarizer_rejects_bad_config_and_naive_time() -> None:
+    with pytest.raises(ValueError, match="min_frames"):
+        TrackSummarizer(min_frames=0)
+    summ = TrackSummarizer()
+    with pytest.raises(ValueError, match="timezone-aware"):
+        summ.update(
+            1,
+            class_name="drone",
+            confidence=0.9,
+            bbox=(0.0, 0.0, 1.0, 1.0),
+            frame=object(),
+            frame_index=0,
+            detected_at=datetime(2026, 6, 9, 14, 0, 0),  # noqa: DTZ001
+        )

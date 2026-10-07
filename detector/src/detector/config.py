@@ -1,7 +1,4 @@
-"""Detector configuration loaded from env / .env (pydantic-settings).
-
-Source of truth for variable names: DESCRIPTION.md section 8.
-"""
+"""Env/.env config. Variable names per DESCRIPTION.md section 8."""
 
 from pathlib import Path
 
@@ -10,11 +7,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """All detector settings. No hard-coded paths or URLs elsewhere in the code."""
+    """All detector settings; nothing else hard-codes paths or URLs."""
 
     model_config = SettingsConfigDict(
-        # Works when the process runs from detector/ (repo .env one level up)
-        # or from the repo root.
+        # Runnable from detector/ or repo root.
         env_file=(".env", "../.env"),
         extra="ignore",
     )
@@ -28,18 +24,21 @@ class Settings(BaseSettings):
     zone_id: str = Field(default="north-gate")
     source_id: str = Field(default="cam-01")
     track_cooldown_seconds: float = Field(default=30.0, ge=0.0)
+    # File sources emit one summary per confirmed track at end of footage.
+    track_min_frames: int = Field(default=3, ge=1)
+    # Inference stride for video: run YOLO every Nth frame (1 = every frame).
+    yolo_stride: int = Field(default=1, ge=1)
     snapshot_dir: Path = Field(default=Path("./data/snapshots"))
     videos_dir: Path = Field(default=Path("./videos"))
     images_dir: Path = Field(default=Path("./images"))
     detector_clock: str = Field(default="video", pattern="^(video|wall)$")
     scenario_start: str = Field(default="2026-06-09T14:00:00Z")
-    # Stage C (optional, M8): crop classifier for visual.model_family.
-    # Off by default; enable once detector/models/family.pt is trained.
+    # Crop classifier for visual.model_family; off until family.pt is trained.
     attr_family_enabled: bool = Field(default=False)
     attr_family_weights: str = Field(default="./detector/models/family.pt")
     attr_family_conf: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 def get_settings() -> Settings:
-    """Build settings from environment / .env. Called by the CLI, never at import time."""
+    """Build from env/.env. Never called at import time."""
     return Settings()

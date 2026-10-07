@@ -1,9 +1,7 @@
-"""Ultralytics YOLO wrapper (FR-D2).
+"""YOLO wrapper (FR-D2). Weights come from YOLO_WEIGHTS.
 
-Latest model family is YOLO26 (e.g. `yolo26n.pt`); weights come from
-YOLO_WEIGHTS. COCO-pretrained weights have no `drone` class, so until the
-fine-tuned drone model (M8) exists, YOLO_TARGET_CLASSES may name stand-ins
-(e.g. `airplane`); that mode logs a warning on every start.
+COCO weights have no drone class; stand-ins via YOLO_TARGET_CLASSES log a
+warning at startup until the fine-tuned drone model exists.
 """
 
 import logging
@@ -18,8 +16,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Detection:
-    """One kept box: model class name, confidence, xyxy pixels."""
-
     class_name: str
     confidence: float
     bbox: tuple[float, float, float, float]
@@ -27,26 +23,22 @@ class Detection:
 
 @dataclass(frozen=True)
 class TrackedDetection(Detection):
-    """A detection with the tracker's stable id (`None` before association)."""
+    """track_id is None before tracker association."""
 
     track_id: int | None
 
 
-#: Built-in tracker (ships with ultralytics, no extra config needed).
+#: Built-in tracker; ships with ultralytics.
 TRACKER_CONFIG = "bytetrack.yaml"
 
-#: Airframe types the server understands (DESCRIPTION.md section 2, `drones`
-#: collection). Stage B (PROJECT.md 5.4): when the YOLO model is trained with
-#: airframe classes, the predicted class maps to `visual.airframe_type`.
-#: Generic labels (`drone`, `airplane`, ...) carry no airframe info and
-#: produce no `visual` (stage A behavior).
+#: Server DB values (DESCRIPTION.md section 2, drones). Generic labels carry
+#: no airframe and produce no visual; the server then skips the cross-check
+#: (DESCRIPTION.md section 4).
 AIRFRAME_TYPES = frozenset(
     {"quadcopter", "hexacopter", "octocopter", "fixed_wing", "vtol", "helicopter"}
 )
 
-#: Detector-side aliases normalized to AIRFRAME_TYPES. `multirotor_heavy` is
-#: a training-time grouping (PROJECT.md 5.4 example) with no DB counterpart,
-#: so it maps to None (no visual) rather than a wrong exact match.
+#: Normalized aliases. Groupings without a DB value map to None, never a wrong match.
 AIRFRAME_ALIASES: dict[str, str | None] = {
     "quadcopter": "quadcopter",
     "quad": "quadcopter",
@@ -69,13 +61,7 @@ AIRFRAME_ALIASES: dict[str, str | None] = {
 
 
 def airframe_from_class(class_name: str) -> str | None:
-    """Map a YOLO class name to `visual.airframe_type` (Stage B).
-
-    Normalizes case/separators, then looks up AIRFRAME_ALIASES. Returns None
-    when the class carries no airframe info (generic `drone`, stand-ins,
-    or groupings like `multirotor_heavy`). The server treats a missing
-    `visual` as "skip the cross-check" (DESCRIPTION.md section 4).
-    """
+    """Map YOLO class to visual.airframe_type; None means omit visual (DESCRIPTION.md section 4)."""
     key = class_name.strip().lower().replace("-", "_").replace(" ", "_")
     key = "_".join(part for part in key.split("_") if part)
     if key in AIRFRAME_TYPES:
@@ -84,12 +70,12 @@ def airframe_from_class(class_name: str) -> str | None:
 
 
 def parse_target_classes(raw: str) -> set[str]:
-    """Split YOLO_TARGET_CLASSES ("airplane, bird") into a name set."""
+    """Parse YOLO_TARGET_CLASSES."""
     return {part.strip().lower() for part in raw.split(",") if part.strip()}
 
 
 class Detector:
-    """Loads YOLO once, filters predictions to the configured target classes."""
+    """Loads YOLO once, keeps only configured target classes."""
 
     def __init__(
         self,
@@ -105,7 +91,7 @@ class Detector:
             names = ", ".join(sorted(target_classes))
             logger.warning(
                 "target classes are stand-ins (%s), not 'drone': fine-tuned "
-                "drone weights are not trained yet (see M8). Detections are "
+                "drone weights are not trained yet (see docs/TRAINING.md). Detections are "
                 "proxies, not real drone detections.",
                 names,
             )
@@ -120,25 +106,30 @@ class Detector:
         names = getattr(self._model, "names", {})
         self._names: dict[int, str] = {int(k): str(v).lower() for k, v in dict(names).items()}
 
+    @property
+    def imgsz(self) -> int:
+        """Inference image size, for latency logs."""
+        return self._imgsz
+
     @staticmethod
     def _resolve_weights(weights: Path, repo_root: Path) -> Path:
-        """Accept an existing file or a pretrained model name (auto-download)."""
+        """Existing file or pretrained name (auto-downloaded)."""
         if weights.is_file():
             return weights
         under_root = repo_root / weights
         if under_root.is_file():
             return under_root
         if weights.parent == Path("."):
-            # Bare name like `yolo26n.pt`: Ultralytics downloads it on first use.
+            # Bare name (yolo26n.pt): downloaded on first use.
             return weights
         raise FileNotFoundError(
             f"YOLO weights not found: {weights}. Set YOLO_WEIGHTS to a model "
             "file or a pretrained name such as 'yolo26n.pt' (downloaded "
-            "automatically), or train the fine-tuned drone model (M8)."
+            "automatically), or train the fine-tuned drone model (docs/TRAINING.md)."
         )
 
     def predict(self, frame_bgr: np.ndarray) -> list[Detection]:
-        """Run inference on one BGR frame; return kept detections only."""
+        """One BGR frame to kept detections."""
         results = self._model.predict(frame_bgr, conf=self._conf, imgsz=self._imgsz, verbose=False)
         kept: list[Detection] = []
         for result in results:
@@ -154,7 +145,7 @@ class Detector:
         return kept
 
     def track(self, frame_bgr: np.ndarray) -> list[TrackedDetection]:
-        """Track across frames (`persist=True`); ids are stable per run only."""
+        """Ids are per-run only, never identity."""
         results = self._model.track(
             frame_bgr,
             persist=True,
@@ -186,7 +177,7 @@ class Detector:
         return tracked
 
     def reset_tracker(self) -> None:
-        """Drop tracker state between video files (ids restart per source)."""
+        """Drop state between files; ids restart per source."""
         predictor = getattr(self._model, "predictor", None)
         trackers = getattr(predictor, "trackers", None)
         if trackers:
@@ -194,7 +185,6 @@ class Detector:
             logger.debug("tracker state reset")
 
     def _kept(self, cls_id: float, conf: float, xyxy: list[float]) -> Detection | None:
-        """Build a Detection when the class is a configured target, else None."""
         name = self._names.get(int(cls_id), str(int(cls_id)))
         if name not in self._targets:
             return None
@@ -202,14 +192,34 @@ class Detector:
         return Detection(class_name=name, confidence=float(conf), bbox=(x1, y1, x2, y2))
 
 
+def track_color(track_id: int | None) -> tuple[int, int, int]:
+    """Per-track display color; stable for the run."""
+    if track_id is None:
+        return (0, 255, 0)
+    palette = (
+        (0, 255, 0),  # green
+        (255, 0, 0),  # blue
+        (0, 0, 255),  # red
+        (0, 255, 255),  # yellow
+        (255, 0, 255),  # magenta
+        (255, 255, 0),  # cyan
+        (0, 165, 255),  # orange
+        (180, 0, 180),  # purple
+        (0, 128, 255),  # orange-red
+        (255, 255, 255),  # white
+    )
+    return palette[int(track_id) % len(palette)]
+
+
 def annotate(frame_bgr: np.ndarray, detections: list[Detection]) -> np.ndarray:
-    """Draw boxes + labels; returns a new image, input untouched."""
+    """Annotate a copy; input untouched."""
     annotated = frame_bgr.copy()
     for det in detections:
         x1, y1, x2, y2 = (int(v) for v in det.bbox)
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        label = f"{det.class_name} {det.confidence:.2f}"
         track_id = getattr(det, "track_id", None)
+        color = track_color(track_id if isinstance(track_id, int) else None)
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+        label = f"{det.class_name} {det.confidence:.2f}"
         if track_id is not None:
             label += f" id={track_id}"
         cv2.putText(
@@ -218,7 +228,7 @@ def annotate(frame_bgr: np.ndarray, detections: list[Detection]) -> np.ndarray:
             (x1, max(0, y1 - 8)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
-            (0, 255, 0),
+            color,
             2,
             cv2.LINE_AA,
         )
