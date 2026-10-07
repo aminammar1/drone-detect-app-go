@@ -21,7 +21,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"drone-detect-app/server/internal/api"
-	"drone-detect-app/server/internal/authz"
+	"drone-detect-app/server/internal/authorization"
 	"drone-detect-app/server/internal/config"
 	"drone-detect-app/server/internal/export"
 	"drone-detect-app/server/internal/identity"
@@ -76,7 +76,7 @@ func main() {
 		Grace:         time.Duration(cfg.ResolveGraceMS) * time.Millisecond,
 		VisualMinConf: cfg.VisualMinConf,
 	}
-	decider := &authz.Decider{Zones: repos, Authz: repos}
+	decider := &authorization.Decider{Zones: repos, Authorizations: repos}
 	notifier := buildNotifier(logger, cfg)
 	exporter, fallback := buildExporter(ctx, logger, cfg)
 	worker := export.NewWorker(export.Deps{

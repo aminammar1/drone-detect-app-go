@@ -1,7 +1,5 @@
-// Package authz is the authorization decision engine.
-// It implements DESCRIPTION.md section 5 in order; the first match wins.
-// All time comparisons use the event's detected_at, never server time.
-package authz
+// Package authorization implements DESCRIPTION.md section 5; first match wins on event time.
+package authorization
 
 import (
 	"context"
@@ -16,33 +14,30 @@ import (
 	"drone-detect-app/server/internal/store"
 )
 
-// Decider needs zone and authorization lookups. The identity comes from
-// the Resolver (explicit identifier in M2, beacons in M5).
+// Decider checks permits; identity is resolver output.
 type Decider struct {
-	Zones Zones
-	Authz Authorizations
+	Zones          Zones
+	Authorizations Authorizations
 }
 
-// Zones finds a zone by ID.
+// Zones looks up a zone by ID.
 type Zones interface {
 	FindZoneByID(ctx context.Context, id string) (*model.Zone, error)
 }
 
-// Authorizations finds the active permit for (drone, zone, at).
+// Authorizations finds the covering permit for (drone, zone, at).
 type Authorizations interface {
 	FindActive(ctx context.Context, droneID bson.ObjectID, zoneID string, at time.Time) (*model.Authorization, error)
 }
 
-// Outcome is a decision with its human-readable reason.
+// Outcome pairs a decision with its reason.
 type Outcome struct {
 	Decision string
 	Reason   string
 	Drone    *model.Drone
 }
 
-// Decide evaluates DESCRIPTION.md section 5 rules in order.
-// A store failure returns an error; the caller must log it and answer
-// "unidentified" (never crash, never authorize on error).
+// Decide applies DESCRIPTION.md section 5 in order; store errors fail closed to unidentified.
 func (d *Decider) Decide(ctx context.Context, det *model.Detection, id identity.Result) (Outcome, error) {
 	switch id.Outcome {
 	case model.IdentityNone:
@@ -72,7 +67,7 @@ func (d *Decider) Decide(ctx context.Context, det *model.Detection, id identity.
 	if zone.RestrictionLevel == "no-fly" {
 		return Outcome{Decision: model.DecisionUnauthorized, Reason: "no-fly zone", Drone: drone}, nil
 	}
-	auth, err := d.Authz.FindActive(ctx, drone.ID, det.ZoneID, det.DetectedAt)
+	auth, err := d.Authorizations.FindActive(ctx, drone.ID, det.ZoneID, det.DetectedAt)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			auth = nil // normal case: simply no permit
@@ -86,7 +81,7 @@ func (d *Decider) Decide(ctx context.Context, det *model.Detection, id identity.
 	return Outcome{Decision: model.DecisionUnauthorized, Reason: fmt.Sprintf("no active authorization for zone %s", det.ZoneID), Drone: drone}, nil
 }
 
-// Ensure Decider works against the Mongo implementation at compile time.
+// Wiring check against MongoStore.
 var (
 	_ Zones          = (*store.MongoStore)(nil)
 	_ Authorizations = (*store.MongoStore)(nil)

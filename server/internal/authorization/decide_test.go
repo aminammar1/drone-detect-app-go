@@ -1,4 +1,4 @@
-package authz
+package authorization
 
 import (
 	"context"
@@ -35,13 +35,13 @@ func (f *fakeZones) FindZoneByID(_ context.Context, _ string) (*model.Zone, erro
 	return f.zone, f.err
 }
 
-type fakeAuthz struct {
+type fakeAuthorizations struct {
 	auth  *model.Authorization
 	err   error
 	gotAt time.Time
 }
 
-func (f *fakeAuthz) FindActive(_ context.Context, _ bson.ObjectID, _ string, at time.Time) (*model.Authorization, error) {
+func (f *fakeAuthorizations) FindActive(_ context.Context, _ bson.ObjectID, _ string, at time.Time) (*model.Authorization, error) {
 	f.gotAt = at
 	return f.auth, f.err
 }
@@ -84,8 +84,8 @@ func TestDecide(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			zones := &fakeZones{zone: tt.zone, err: tt.zoneErr}
-			authz := &fakeAuthz{auth: tt.auth, err: tt.authErr}
-			d := &Decider{Zones: zones, Authz: authz}
+			permits := &fakeAuthorizations{auth: tt.auth, err: tt.authErr}
+			d := &Decider{Zones: zones, Authorizations: permits}
 			got, err := d.Decide(ctx, newDet(), tt.identity)
 			if tt.wantErr {
 				require.Error(t, err)
@@ -98,13 +98,12 @@ func TestDecide(t *testing.T) {
 	}
 }
 
-// The authorization lookup must use detected_at (event time), so replayed
-// videos give the same decision regardless of when the server runs.
+// Event time keeps replays deterministic.
 func TestDecideUsesEventTime(t *testing.T) {
-	authz := &fakeAuthz{auth: permit}
-	d := &Decider{Zones: &fakeZones{zone: openZone}, Authz: authz}
+	permits := &fakeAuthorizations{auth: permit}
+	d := &Decider{Zones: &fakeZones{zone: openZone}, Authorizations: permits}
 	det := &model.Detection{EventID: "e1", DetectedAt: testAt, ZoneID: "north-gate"}
 	_, err := d.Decide(context.Background(), det, identified(activeDorn))
 	require.NoError(t, err)
-	assert.True(t, authz.gotAt.Equal(testAt), "lookup used %v, want event time %v", authz.gotAt, testAt)
+	assert.True(t, permits.gotAt.Equal(testAt), "lookup used %v, want event time %v", permits.gotAt, testAt)
 }
