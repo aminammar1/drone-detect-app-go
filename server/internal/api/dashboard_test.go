@@ -37,10 +37,8 @@ func TestHealthEndpoint(t *testing.T) {
 	srv := httptest.NewServer(r)
 	defer srv.Close()
 
-	for _, path := range []string{"/health", "/healthz"} {
-		resp, err := http.Get(srv.URL + path)
-		require.NoError(t, err)
-		defer resp.Body.Close()
-		require.Equal(t, http.StatusOK, resp.StatusCode, path)
-	}
+	resp, err := http.Get(srv.URL + "/health")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 }

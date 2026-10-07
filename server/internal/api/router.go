@@ -27,7 +27,6 @@ func NewRouter(logger *slog.Logger, h Handlers) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	}
 	r.GET("/health", health)
-	r.GET("/healthz", health) // legacy alias
 	r.GET("/ws/detector", h.Detector)
 	r.GET("/ws/beacons", h.Beacons)
 	r.GET("/ws/alerts", h.Alerts)

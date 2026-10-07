@@ -28,7 +28,7 @@ Do not copy version numbers into other files.
 - **FR-S1** `GET /ws/detector` — WebSocket for detectors (events up, acks down).
 - **FR-S2** `GET /ws/beacons` — WebSocket for Remote ID beacon sources (simulator now, real receiver later).
 - **FR-S3** `GET /ws/alerts` — WebSocket for live alert clients.
-- **FR-S4** `GET /health` (`GET /healthz` kept as a legacy alias).
+- **FR-S4** `GET /health`.
 - **FR-S5** Validate every incoming message (schema, required fields, confidence in [0, 1]). Reject invalid ones with an `error` message; never crash. Gin `Recovery` middleware is mandatory.
 - **FR-S6** Keep a **beacon buffer** keyed by event time, with retention `BEACON_RETENTION_S`.
 - **FR-S7** Run the **Identity Resolver** (section 4) and then the **decision logic** (section 5) for each detection.
