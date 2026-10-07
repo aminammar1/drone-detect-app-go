@@ -1,0 +1,38 @@
+# Secrets and local config — never commit
+.env
+secrets/
+*.json.key
+*credentials*.json
+
+# Model weights (large artifacts)
+*.pt
+*.onnx
+*.engine
+
+# Runtime data (snapshots, CSV exports)
+data/
+
+# Input media content (provided by owner, read-only) — keep the folders, ignore the files
+videos/*
+!videos/.gitkeep
+images/*
+!images/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv*/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Go
+bin/
+dist/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

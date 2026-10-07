@@ -1,0 +1,44 @@
+[project]
+name = "detector"
+version = "0.1.0"
+description = "YOLO drone detector: images/video/camera input, WebSocket detection events to the Go server."
+readme = "README.md"
+requires-python = ">=3.14"
+# Latest stable versions are resolved by `uv add` / `uv lock --upgrade`.
+# The dated snapshot lives in PROJECT.md section 2 (verified 2026-10-06).
+# All deps are in [project] (not a dev group) so the documented
+# `uv run pytest` / `uv run ruff` commands work without extra flags.
+dependencies = [
+  "ultralytics",
+  "opencv-python",
+  "websockets",
+  "pydantic",
+  "pydantic-settings",
+  "typer",
+  "pytest",
+  "pytest-asyncio",
+  "ruff",
+  "numpy>=2.5.3",
+  "lap>=0.5.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/detector"]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+
+[tool.hatch.build]
+artifacts = []
