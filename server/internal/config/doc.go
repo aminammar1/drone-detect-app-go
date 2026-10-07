@@ -1,2 +1,2 @@
-// Package config loads server configuration from env / .env.
+// Package config loads env per DESCRIPTION.md section 8.
 package config

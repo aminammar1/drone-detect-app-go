@@ -1,8 +1,4 @@
-// Command server starts the Drone Detect App Go server (Gin).
-//
-// Detector and beacon WebSockets feed the identity resolver and the
-// authorization decision pipeline; every stored detection is queued for
-// Sheets/CSV export by a background worker, and alerts fan out to subscribers.
+// Command server runs the detection pipeline: WS ingest -> resolve -> decide -> store -> alert/export.
 package main
 
 import (
@@ -33,7 +29,7 @@ import (
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	// Load repo-root .env in dev; missing file is fine (env may be set directly).
+	// Best-effort .env for local dev; direct env already works.
 	_ = godotenv.Load("../.env", ".env", "../../.env")
 
 	cfg := config.Load()
@@ -120,8 +116,7 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// Graceful shutdown: stop accepting connections, flush the export queue,
-	// then close MongoDB.
+	// Shutdown order: stop HTTP, flush exports, then close Mongo.
 	stopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -142,8 +137,7 @@ func main() {
 		logger.Error("graceful shutdown failed", "err", fmt.Errorf("shutdown: %w", err))
 		os.Exit(1)
 	}
-	// Flush the export queue before closing MongoDB so no detection is left
-	// behind unexported.
+	// Must flush before Mongo closes; otherwise pending rows are lost.
 	cancelExport()
 	select {
 	case <-worker.Done():
@@ -154,14 +148,13 @@ func main() {
 	logger.Info("server stopped")
 }
 
-// buildNotifier returns the console notifier. Google Sheets export is
-// separate (buildExporter); alerts only log, never block the pipeline.
+// buildNotifier returns the console sink; export stays separate.
 func buildNotifier(logger *slog.Logger, _ config.Config) notify.Notifier {
 	return &notify.ConsoleNotifier{Logger: logger}
 }
 
-// snapshotDir resolves the snapshots directory: configured value first,
-// then the usual repo-root and server-local fallbacks.
+// snapshotDir prefers config, then repo-root/server fallbacks. The chosen
+// dir is created so /snapshots/ thumbnails (session pictures) always serve.
 func snapshotDir(cfg config.Config) string {
 	for _, dir := range []string{cfg.SnapshotDir, "../data/snapshots", "data/snapshots"} {
 		if dir == "" {
@@ -171,12 +164,15 @@ func snapshotDir(cfg config.Config) string {
 			return dir
 		}
 	}
-	return cfg.SnapshotDir
+	dir := cfg.SnapshotDir
+	if dir == "" {
+		dir = "../data/snapshots"
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	return dir
 }
 
-// buildExporter selects the export sink. EXPORT_BACKEND=csv needs no Google
-// setup; sheets fails fast with a clear message when authentication or the
-// sheet ID is missing (DESCRIPTION.md section 7).
+// buildExporter selects the sink; sheets fails fast without auth/sheet ID (DESCRIPTION.md section 7).
 func buildExporter(ctx context.Context, logger *slog.Logger, cfg config.Config) (export.Exporter, *export.CSVExporter) {
 	const dir = "data/exports"
 	switch cfg.ExportBackend {

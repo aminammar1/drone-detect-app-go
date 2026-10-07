@@ -1,5 +1,3 @@
-// Package ws holds the WebSocket handlers: /ws/detector and /ws/alerts
-// (M2). /ws/beacons arrives in M5. See DESCRIPTION.md section 3.
 package ws
 
 import (
@@ -8,34 +6,30 @@ import (
 	"drone-detect-app/server/internal/model"
 )
 
-// Hub broadcasts alerts to /ws/alerts clients. Slow clients are dropped
-// instead of blocking the pipeline (stage 10 failure behavior).
+// Hub fans out alerts; slow clients are evicted, never block.
 type Hub struct {
 	mu      sync.Mutex
 	clients map[*alertClient]struct{}
 }
 
-// alertClient is one subscriber. Only the client's own write goroutine
-// sends on conn; the hub only appends to send (never writes concurrently).
+// alertClient owns one send queue; only its goroutine writes the conn.
 type alertClient struct {
 	send chan []byte
 }
 
-// NewHub returns an empty hub. It needs no goroutine: broadcast never
-// blocks, so there is nothing to pump.
+// NewHub needs no goroutine; broadcast never blocks.
 func NewHub() *Hub {
 	return &Hub{clients: make(map[*alertClient]struct{})}
 }
 
-// Add registers a client; Remove unregisters it. Clients must call Remove
-// (or Close) when their connection ends.
+// Add registers a client.
 func (h *Hub) Add(c *alertClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.clients[c] = struct{}{}
 }
 
-// Remove unregisters a client and closes its send channel.
+// Remove unregisters and closes send.
 func (h *Hub) Remove(c *alertClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -45,19 +39,18 @@ func (h *Hub) Remove(c *alertClient) {
 	}
 }
 
-// Count reports registered clients (for tests and logs).
+// Count reports clients.
 func (h *Hub) Count() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.clients)
 }
 
-// Broadcast sends an alert to every client. A client whose buffer is full
-// is evicted so one slow reader can never stall the pipeline.
+// Broadcast fans out; full buffers are evicted.
 func (h *Hub) Broadcast(alert *model.Alert) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	// Marshal is infallible for our struct; errors are handled by callers.
+	// Alert always marshals.
 	for c := range h.clients {
 		select {
 		case c.send <- marshalAlert(alert):

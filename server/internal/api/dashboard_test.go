@@ -32,13 +32,15 @@ func TestDashboardServesPage(t *testing.T) {
 	require.Contains(t, body, "snapshot")
 }
 
-func TestHealthzStillOK(t *testing.T) {
+func TestHealthEndpoint(t *testing.T) {
 	r := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), Handlers{})
 	srv := httptest.NewServer(r)
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/healthz")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	for _, path := range []string{"/health", "/healthz"} {
+		resp, err := http.Get(srv.URL + path)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, path)
+	}
 }

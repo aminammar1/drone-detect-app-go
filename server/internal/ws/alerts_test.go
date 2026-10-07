@@ -64,19 +64,19 @@ func TestAlertsTokenRequired(t *testing.T) {
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/alerts"
 
-	// No token -> 403, not registered.
+	// Rejects unauthenticated.
 	_, resp := dial(t, wsURL, "", "")
 	require.NotNil(t, resp)
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 	require.Equal(t, 0, hub.Count())
 
-	// Query token works (browsers).
+	// ?token= passes.
 	conn, _ := dial(t, wsURL, "secret", "")
 	require.NotNil(t, conn)
 	require.Equal(t, 1, hub.Count())
 	_ = conn.Close()
 
-	// Header token works (bots).
+	// Header token passes.
 	conn2, _ := dial(t, wsURL, "", "secret")
 	require.NotNil(t, conn2)
 	_ = conn2.Close()

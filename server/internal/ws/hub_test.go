@@ -40,14 +40,14 @@ func TestHubBroadcast(t *testing.T) {
 
 func TestHubDropsSlowClient(t *testing.T) {
 	hub := NewHub()
-	slow := &alertClient{send: make(chan []byte, 1)} // tiny buffer, never drained
+	slow := &alertClient{send: make(chan []byte, 1)} // Never drained.
 	fast := &alertClient{send: make(chan []byte, 16)}
 	hub.Add(slow)
 	hub.Add(fast)
 
-	hub.Broadcast(testAlert()) // fills slow's buffer
+	hub.Broadcast(testAlert()) // Fills slow.
 	require.Equal(t, 2, hub.Count())
-	hub.Broadcast(testAlert()) // slow is full: evicted, fast still served
+	hub.Broadcast(testAlert()) // Slow evicted, fast served.
 	assert.Equal(t, 1, hub.Count())
 	assert.Contains(t, drain(t, fast), `"event_id":"e1"`)
 }
@@ -60,7 +60,7 @@ func TestHubDisconnect(t *testing.T) {
 
 	hub.Remove(a)
 	assert.Equal(t, 0, hub.Count())
-	// Send channel is closed so the client's pump exits.
+	// Closed send exits the pump.
 	select {
 	case _, ok := <-a.send:
 		assert.False(t, ok, "send channel must be closed after Remove")
@@ -68,7 +68,7 @@ func TestHubDisconnect(t *testing.T) {
 		t.Fatal("expected closed channel after Remove")
 	}
 
-	// Double remove is safe; broadcast to nobody is a no-op.
+	// Double remove and empty broadcast are safe.
 	hub.Remove(a)
 	assert.Equal(t, 0, hub.Count())
 	hub.Broadcast(testAlert())
@@ -84,14 +84,12 @@ func TestHubBroadcastAfterRemoveGetsNothing(t *testing.T) {
 
 	hub.Broadcast(testAlert())
 	assert.Equal(t, 1, hub.Count())
-	// a.send is closed by Remove: a receive succeeds with ok=false, never
-	// with a live message.
+	// Removed clients read closed, never a live message.
 	select {
 	case msg, ok := <-a.send:
 		require.False(t, ok, "removed client channel must be closed, got %q", string(msg))
 	default:
-		// Also acceptable: nothing queued (if Remove had not closed, which
-		// it does — this branch guards against implementation changes).
+		// Tolerates future non-closing Remove.
 	}
 	assert.Contains(t, drain(t, b), `"event_id":"e1"`)
 }

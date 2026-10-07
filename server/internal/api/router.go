@@ -1,6 +1,4 @@
-// Package api builds the Gin router: gin.New() with gin.Recovery() and a
-// log/slog request-logging middleware. Serves GET /, GET /healthz,
-// GET /ws/detector, GET /ws/beacons and GET /ws/alerts.
+// Package api owns routing; Recovery keeps bad events from crashing the server.
 package api
 
 import (
@@ -11,24 +9,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Handlers are the mounted route handlers; main wires the implementations.
+// Handlers are injected by main; no globals.
 type Handlers struct {
 	Detector gin.HandlerFunc
 	Beacons  gin.HandlerFunc
 	Alerts   gin.HandlerFunc
 }
 
-// NewRouter wires middleware and routes. Dependencies are passed in;
-// there are no package-level globals.
+// NewRouter builds the engine from injected handlers.
 func NewRouter(logger *slog.Logger, h Handlers) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(requestLogger(logger))
 
 	r.GET("/", DashboardHandler())
-	r.GET("/healthz", func(c *gin.Context) {
+	health := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+	}
+	r.GET("/health", health)
+	r.GET("/healthz", health) // legacy alias
 	r.GET("/ws/detector", h.Detector)
 	r.GET("/ws/beacons", h.Beacons)
 	r.GET("/ws/alerts", h.Alerts)
@@ -36,7 +35,6 @@ func NewRouter(logger *slog.Logger, h Handlers) *gin.Engine {
 	return r
 }
 
-// requestLogger is a structured access log via log/slog.
 func requestLogger(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()

@@ -9,35 +9,30 @@ import (
 	"drone-detect-app/server/internal/store"
 )
 
-// Identification confidence for resolved matches. Explicit claims outrank
-// radio correlation; ambiguity and mismatch carry no confidence.
+// Explicit claims outrank radio; ambiguity/mismatch carry no confidence.
 const (
 	confidenceExplicit  = 1.0
 	confidenceBeacon    = 0.9
 	confidenceAmbiguous = 0.5
 )
 
-// gracePollInterval is how often a grace wait rechecks the buffer.
 const gracePollInterval = 50 * time.Millisecond
 
-// Correlator is the DESCRIPTION.md section 4 resolver: explicit identifier,
-// then beacon correlation by zone and event-time window, then the visual
-// cross-check. It never uses track_id as identity.
+// Correlator implements DESCRIPTION.md section 4; never uses track_id as identity.
 type Correlator struct {
 	Drones store.Drones
 	Buffer *Buffer
-	// Window is BEACON_WINDOW_S: |beacon.timestamp - detected_at| bound.
+	// Window bounds |beacon.timestamp - detected_at|.
 	Window time.Duration
-	// Grace is RESOLVE_GRACE_MS: how long to wait for a late beacon before
-	// finalizing "none". Applies only when no beacon matches yet.
+	// Grace delays none so late beacons still correlate.
 	Grace time.Duration
-	// VisualMinConf is VISUAL_MIN_CONF: visual evidence below it is ignored.
+	// VisualMinConf ignores weak visual evidence.
 	VisualMinConf float64
 }
 
-// Resolve maps one detection to an identity Result.
+// Resolve maps a detection to a Result.
 func (r *Correlator) Resolve(ctx context.Context, det *model.Detection) (Result, error) {
-	// Step 1 (explicit): an identifier claim short-circuits beacons.
+	// Explicit claims short-circuit beacons.
 	if det.Identifier.Kind != model.IdentifierNone && det.Identifier.Value != "" {
 		drone, err := lookupDrone(ctx, r.Drones, det.Identifier.Value)
 		if err != nil {
@@ -50,12 +45,12 @@ func (r *Correlator) Resolve(ctx context.Context, det *model.Detection) (Result,
 		}, nil
 	}
 
-	// Step 1 (beacon): same zone, event-time window, one entry per serial.
+	// Beacon candidates share zone and event-time window.
 	candidates := r.Buffer.Match(det.ZoneID, det.DetectedAt, r.Window)
 	if len(candidates) == 0 && r.Grace > 0 {
 		candidates = r.waitForLateBeacon(ctx, det)
 	}
-	// Step 2: no candidates -> none (rogue: visible, not broadcasting).
+	// No candidates means visible but silent.
 	if len(candidates) == 0 {
 		if err := ctx.Err(); err != nil {
 			return Result{}, err
@@ -72,16 +67,14 @@ func (r *Correlator) Resolve(ctx context.Context, det *model.Detection) (Result,
 		drones[i] = drone
 	}
 
-	// Step 3: visual cross-check, only with confident attributes.
+	// Cross-check only on confident visual.
 	if usableVisual(det.Visual, r.VisualMinConf) {
 		return r.crossCheck(det, candidates, drones), nil
 	}
 	return r.fromCandidates(candidates, drones, model.MethodBeacon), nil
 }
 
-// waitForLateBeacon polls the buffer until a beacon arrives or the grace
-// period (or context) expires. Late beacons carry event-time timestamps, so
-// they still correlate by detected_at when they show up in time.
+// waitForLateBeacon waits for event-time beacons that arrive late.
 func (r *Correlator) waitForLateBeacon(ctx context.Context, det *model.Detection) []model.Beacon {
 	deadline := time.Now().Add(r.Grace)
 	for {
@@ -104,16 +97,12 @@ func (r *Correlator) waitForLateBeacon(ctx context.Context, det *model.Detection
 	}
 }
 
-// usableVisual reports whether the detection carries visual evidence worth
-// checking (FR-D8, DESCRIPTION.md section 4 rule 3).
+// usableVisual gates the cross-check per DESCRIPTION.md section 4 rule 3.
 func usableVisual(v *model.Visual, minConf float64) bool {
 	return v != nil && v.AirframeType != "" && v.AirframeConfidence >= minConf
 }
 
-// crossCheck applies the visual filter over beacon candidates:
-// compatible registrations survive; a lone incompatible registration is a
-// mismatch (possible spoofing). Serials with no DB row are never filtered
-// here — the decision step reports them as "not registered".
+// crossCheck filters by visual; unregistered serials survive for the decision step.
 func (r *Correlator) crossCheck(det *model.Detection, candidates []model.Beacon, drones []*model.Drone) Result {
 	if len(candidates) == 1 {
 		if drones[0] != nil && !compatible(det.Visual, drones[0], r.VisualMinConf) {
@@ -138,7 +127,7 @@ func (r *Correlator) crossCheck(det *model.Detection, candidates []model.Beacon,
 	}
 	switch len(keptBeacons) {
 	case 0:
-		// Every claimed identity contradicts what the camera saw.
+		// All claims contradict the camera.
 		return Result{
 			Method: model.MethodBeaconVisual, Outcome: model.IdentityMismatch,
 			Candidates: len(candidates),
@@ -157,8 +146,7 @@ func (r *Correlator) crossCheck(det *model.Detection, candidates []model.Beacon,
 	}
 }
 
-// fromCandidates resolves without visual evidence: one left is identified,
-// more than one is ambiguous.
+// fromCandidates resolves without visual: one is identified, many is ambiguous.
 func (r *Correlator) fromCandidates(candidates []model.Beacon, drones []*model.Drone, method string) Result {
 	if len(candidates) == 1 {
 		return Result{
@@ -173,9 +161,7 @@ func (r *Correlator) fromCandidates(candidates []model.Beacon, drones []*model.D
 	}
 }
 
-// compatible compares seen attributes against the registration:
-// airframe_type is an exact match; model_family is case-insensitive and
-// only counts when the detection is confident about it.
+// compatible exact-matches airframe; family is case-insensitive when confident.
 func compatible(v *model.Visual, drone *model.Drone, minConf float64) bool {
 	if v.AirframeType != drone.AirframeType {
 		return false

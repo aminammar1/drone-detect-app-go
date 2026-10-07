@@ -7,29 +7,25 @@ import (
 	"drone-detect-app/server/internal/model"
 )
 
-// bufferedBeacon is a beacon plus its arrival time. Retention is measured
-// from arrival (wall clock): correlation itself always uses the beacon's
-// event-time `timestamp`, so preloaded scenario beacons stay usable for the
-// whole demo while the buffer still forgets stale radio traffic.
+// bufferedBeacon pairs event-time beacon with wall-clock arrival; retention uses arrival only.
 type bufferedBeacon struct {
 	model.Beacon
 	receivedAt time.Time
 }
 
-// Buffer is the in-memory Remote ID beacon store (FR-S6). One per process,
-// shared by the /ws/beacons handler (writes) and the resolver (reads).
+// Buffer is the process-wide beacon store (FR-S6); writes from /ws/beacons, reads from resolver.
 type Buffer struct {
 	mu        sync.RWMutex
 	beacons   []bufferedBeacon
 	retention time.Duration
 }
 
-// NewBuffer returns a buffer that drops beacons older than retention.
+// NewBuffer drops beacons older than retention.
 func NewBuffer(retention time.Duration) *Buffer {
 	return &Buffer{retention: retention}
 }
 
-// Add stores a beacon and prunes entries past the retention window.
+// Add stores a beacon and prunes expired entries.
 func (b *Buffer) Add(beacon model.Beacon, now time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -37,8 +33,7 @@ func (b *Buffer) Add(beacon model.Beacon, now time.Time) {
 	b.pruneLocked(now)
 }
 
-// Match returns beacons in zone whose event-time timestamp is within window
-// of at, deduplicated by serial (closest timestamp wins ties by arrival).
+// Match correlates by zone and event time; dedupes by serial, closest wins.
 func (b *Buffer) Match(zone string, at time.Time, window time.Duration) []model.Beacon {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -66,7 +61,6 @@ func (b *Buffer) Match(zone string, at time.Time, window time.Duration) []model.
 	return out
 }
 
-// pruneLocked drops beacons received longer ago than the retention window.
 func (b *Buffer) pruneLocked(now time.Time) {
 	kept := b.beacons[:0]
 	for _, cand := range b.beacons {

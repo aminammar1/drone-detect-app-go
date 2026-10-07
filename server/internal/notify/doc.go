@@ -1,3 +1,2 @@
-// Package notify holds alert broadcasting to /ws/alerts clients (M7).
-// See DESCRIPTION.md section 3.5.
+// Package notify pushes /ws/alerts without blocking; DESCRIPTION.md section 3.5.
 package notify

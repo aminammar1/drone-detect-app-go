@@ -28,7 +28,7 @@ func TestFormat(t *testing.T) {
 	require.Contains(t, s, "north-gate")
 	require.Contains(t, s, "SN1")
 	require.Contains(t, s, "e1")
-	// Nil drone never panics.
+	// Nil-drone safe.
 	bare := &model.Alert{Type: model.MsgAlert, EventID: "e2", Decision: model.DecisionUnidentified}
 	require.Contains(t, Format(bare), "unidentified")
 }
@@ -36,7 +36,7 @@ func TestFormat(t *testing.T) {
 func TestConsoleNeverFails(t *testing.T) {
 	n := &ConsoleNotifier{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	require.NoError(t, n.Notify(context.Background(), testAlert()))
-	// Nil logger falls back to default.
+	// Nil logger uses default.
 	require.NoError(t, (&ConsoleNotifier{}).Notify(context.Background(), testAlert()))
 }
 
@@ -50,7 +50,6 @@ func TestMultiTriesAll(t *testing.T) {
 	m := &MultiNotifier{Notifiers: []Notifier{&failer{boom}, ok, nil}}
 	err := m.Notify(context.Background(), testAlert())
 	require.ErrorIs(t, err, boom)
-	// All-ok returns nil.
 	m2 := &MultiNotifier{Notifiers: []Notifier{ok}}
 	require.NoError(t, m2.Notify(context.Background(), testAlert()))
 }

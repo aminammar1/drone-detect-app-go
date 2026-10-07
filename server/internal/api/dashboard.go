@@ -1,5 +1,4 @@
-// Dashboard page (M7): minimal single-file UI at GET / that streams
-// /ws/alerts and renders a live table. No external dependencies.
+// Dependency-free live view over /ws/alerts.
 package api
 
 import (
@@ -9,20 +8,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// DashboardHandler serves the single-file live alerts page.
+// DashboardHandler serves the live alerts page.
 func DashboardHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(dashboardHTML))
 	}
 }
 
-// MountSnapshots serves detector snapshots under /snapshots/*filepath when
-// dir exists. Missing dir is fine (dashboard shows the path as text).
+// MountSnapshots exposes dir at /snapshots; the dir is created when missing
+// so session thumbnails keep working and dashboard pictures never go dark.
 func MountSnapshots(r *gin.Engine, dir string) {
 	if dir == "" {
 		return
 	}
-	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return
 	}
 	r.Static("/snapshots", dir)
@@ -80,8 +79,7 @@ small { color: #888; }
 
   function snapUrl(p) {
     if (!p) return '';
-    // Detector stores repo-relative paths like data/snapshots/2026-06-09/x.jpg.
-    // The server mounts that dir at /snapshots/.
+    // Repo-relative snapshot paths map under /snapshots/.
     var i = p.replace(/\\/g, '/').lastIndexOf('/snapshots/');
     if (i >= 0) return '/snapshots' + p.replace(/\\/g, '/').slice(i + '/snapshots'.length);
     return p;

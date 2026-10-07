@@ -1,6 +1,4 @@
-// Package notify sends alerts to operators via the log (console).
-// It is best-effort and must never block the detection pipeline.
-// Google Sheets export is separate (server/internal/export).
+// Package notify logs alerts best-effort; never blocks the pipeline.
 package notify
 
 import (
@@ -11,13 +9,12 @@ import (
 	"drone-detect-app/server/internal/model"
 )
 
-// Notifier sends one alert to one sink. Implementations honor ctx
-// cancellation and never panic on a nil drone.
+// Notifier sends one alert; honors cancellation, nil-drone safe.
 type Notifier interface {
 	Notify(ctx context.Context, alert *model.Alert) error
 }
 
-// Format is the shared one-line text for console output.
+// Format is the one-line console text.
 func Format(a *model.Alert) string {
 	serial := ""
 	if a.Drone != nil {
@@ -34,12 +31,12 @@ func Format(a *model.Alert) string {
 		a.Decision, a.ZoneID, serial, method, a.Confidence, a.Reason, a.EventID)
 }
 
-// ConsoleNotifier logs alerts via slog. It never fails.
+// ConsoleNotifier logs; never fails.
 type ConsoleNotifier struct {
 	Logger *slog.Logger
 }
 
-// Notify logs the alert with event_id for correlation.
+// Notify logs with event_id.
 func (n *ConsoleNotifier) Notify(_ context.Context, alert *model.Alert) error {
 	log := slog.Default()
 	if n.Logger != nil {
@@ -50,14 +47,12 @@ func (n *ConsoleNotifier) Notify(_ context.Context, alert *model.Alert) error {
 	return nil
 }
 
-// MultiNotifier fans out to several notifiers. It tries all of them and
-// returns the first error (if any); a failing sink never skips the rest.
+// MultiNotifier fans out; one failure never skips the rest.
 type MultiNotifier struct {
 	Notifiers []Notifier
 	Logger    *slog.Logger
 }
 
-// Notify delivers to every child notifier.
 func (m *MultiNotifier) Notify(ctx context.Context, alert *model.Alert) error {
 	var first error
 	for _, n := range m.Notifiers {

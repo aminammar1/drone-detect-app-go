@@ -13,15 +13,13 @@ import (
 	"drone-detect-app/server/internal/model"
 )
 
-// BeaconDeps wires the /ws/beacons endpoint. Beacons are fire-and-forget:
-// valid ones land in the buffer, invalid ones get an error reply.
+// BeaconDeps injects /ws/beacons; beacons are fire-and-forget.
 type BeaconDeps struct {
 	Logger *slog.Logger
 	Buffer *identity.Buffer
 }
 
-// BeaconsHandler upgrades the connection and serves one beacon source.
-// Same socket discipline as detectors: one writer goroutine, ping/pong.
+// BeaconsHandler serves one source; single writer, ping/pong.
 func BeaconsHandler(deps BeaconDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -84,8 +82,7 @@ func (s *beaconSession) writePump() {
 	}
 }
 
-// handle validates one beacon and buffers it. It never crashes the
-// connection: invalid input gets an "error" reply and the loop continues.
+// handle buffers valid beacons; invalid input gets error, never drops the conn.
 func (s *beaconSession) handle(raw []byte) {
 	var env model.Envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
@@ -122,7 +119,7 @@ func (s *beaconSession) sendError(code, msg string) {
 	}
 }
 
-// validateBeacon checks the beacon contract (DESCRIPTION.md section 3.2).
+// validateBeacon enforces DESCRIPTION.md section 3.2.
 func validateBeacon(b *model.Beacon) error {
 	if b.Type != model.MsgBeacon {
 		return fmt.Errorf("type must be %q", model.MsgBeacon)

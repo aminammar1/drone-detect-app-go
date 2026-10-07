@@ -1,4 +1,4 @@
-// Package model — MongoDB documents. Shapes follow DESCRIPTION.md section 2.
+// Package model defines MongoDB documents; DESCRIPTION.md section 2.
 package model
 
 import (
@@ -7,7 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// Drone is a registered drone (drones collection).
+// Drone is a drones row.
 type Drone struct {
 	ID               bson.ObjectID `bson:"_id,omitempty"`
 	SerialNumber     string        `bson:"serial_number"`
@@ -27,7 +27,7 @@ type Drone struct {
 	CreatedAt        time.Time     `bson:"created_at"`
 }
 
-// Owner is a drone owner (owners collection).
+// Owner is an owners row.
 type Owner struct {
 	ID        bson.ObjectID `bson:"_id,omitempty"`
 	Name      string        `bson:"name"`
@@ -37,7 +37,7 @@ type Owner struct {
 	CreatedAt time.Time     `bson:"created_at"`
 }
 
-// Zone is a surveilled area. The ID is a human string like "north-gate".
+// Zone is a surveilled area keyed by string ID.
 type Zone struct {
 	ID               string   `bson:"_id"`
 	Name             string   `bson:"name"`
@@ -46,7 +46,7 @@ type Zone struct {
 	CameraIDs        []string `bson:"camera_ids"`
 }
 
-// Authorization permits a drone in a zone over a time range.
+// Authorization permits a drone in a zone over a range.
 type Authorization struct {
 	ID        bson.ObjectID `bson:"_id,omitempty"`
 	DroneID   bson.ObjectID `bson:"drone_id"`
@@ -58,8 +58,7 @@ type Authorization struct {
 	Status    string        `bson:"status"`
 }
 
-// StoredDetection is a persisted detection with identity and decision
-// (detections collection, DESCRIPTION.md section 2).
+// StoredDetection persists identity+decision; DESCRIPTION.md section 2.
 type StoredDetection struct {
 	ID           bson.ObjectID  `bson:"_id,omitempty"`
 	EventID      string         `bson:"event_id"`

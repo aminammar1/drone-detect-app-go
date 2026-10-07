@@ -1,5 +1,4 @@
-// Package store holds the MongoDB repositories behind small interfaces so
-// the decision logic can be tested with fakes. See DESCRIPTION.md section 2.
+// Package store hides Mongo behind interfaces for fakes; DESCRIPTION.md section 2.
 package store
 
 import (
@@ -14,57 +13,50 @@ import (
 	"drone-detect-app/server/internal/model"
 )
 
-// ErrNotFound is returned when a document does not exist.
+// ErrNotFound signals a missing document.
 var ErrNotFound = errors.New("not found")
 
-// Drones reads drone registrations.
+// Drones reads registrations.
 type Drones interface {
 	FindBySerial(ctx context.Context, serial string) (*model.Drone, error)
 }
 
-// Owners reads owner records.
+// Owners reads owners.
 type Owners interface {
 	FindByID(ctx context.Context, id bson.ObjectID) (*model.Owner, error)
 }
 
-// Zones reads surveilled areas.
+// Zones reads zones.
 type Zones interface {
 	FindZoneByID(ctx context.Context, id string) (*model.Zone, error)
 }
 
-// Authorizations reads flight permits. Lookups use event time (detected_at),
-// never server time, so replayed videos stay deterministic.
+// Authorizations reads permits by event time so replays stay deterministic.
 type Authorizations interface {
 	FindActive(ctx context.Context, droneID bson.ObjectID, zoneID string, at time.Time) (*model.Authorization, error)
 }
 
-// Detections persists detection outcomes. EventID is unique: a resent event
-// must return the stored decision instead of inserting a duplicate.
+// Detections persists outcomes; event_id is unique for idempotent resends.
 type Detections interface {
 	FindByEventID(ctx context.Context, eventID string) (*model.StoredDetection, error)
 	Insert(ctx context.Context, doc *model.StoredDetection) error
-	// FindUnexported returns detections still needing export (export_status
-	// pending or failed), oldest first, for the export worker's startup
-	// requeue (DESCRIPTION.md section 7).
+	// FindUnexported returns pending/failed oldest-first for startup requeue.
 	FindUnexported(ctx context.Context, limit int) ([]*model.StoredDetection, error)
-	// SetExportStatus records export progress for one detection.
+	// SetExportStatus records export progress.
 	SetExportStatus(ctx context.Context, eventID, status string) error
 }
 
-// MongoStore is the MongoDB implementation of all repository interfaces.
-// It holds no globals; wire one per process in main.
+// MongoStore implements all repositories; wire one per process.
 type MongoStore struct {
 	db *mongo.Database
 }
 
-// New returns repositories over db.
+// New wraps db.
 func New(db *mongo.Database) *MongoStore {
 	return &MongoStore{db: db}
 }
 
-// EnsureDetectionIndexes creates the detections indexes (unique event_id,
-// plus export_status for the export worker's startup requeue). The seed tool
-// creates the full index set; this keeps a fresh DB safe.
+// EnsureDetectionIndexes keeps a fresh DB safe; seed owns the full set.
 func (s *MongoStore) EnsureDetectionIndexes(ctx context.Context) error {
 	if _, err := s.db.Collection("detections").Indexes().CreateOne(ctx,
 		mongo.IndexModel{Keys: bson.D{{Key: "event_id", Value: 1}}, Options: options.Index().SetUnique(true)}); err != nil {
@@ -75,7 +67,7 @@ func (s *MongoStore) EnsureDetectionIndexes(ctx context.Context) error {
 	return err
 }
 
-// FindBySerial returns the drone with this serial, or ErrNotFound.
+// FindBySerial looks up by serial or returns ErrNotFound.
 func (s *MongoStore) FindBySerial(ctx context.Context, serial string) (*model.Drone, error) {
 	var d model.Drone
 	if err := s.db.Collection("drones").FindOne(ctx, bson.M{"serial_number": serial}).Decode(&d); err != nil {
@@ -87,7 +79,7 @@ func (s *MongoStore) FindBySerial(ctx context.Context, serial string) (*model.Dr
 	return &d, nil
 }
 
-// FindByID returns the owner, or ErrNotFound.
+// FindByID looks up owner or returns ErrNotFound.
 func (s *MongoStore) FindByID(ctx context.Context, id bson.ObjectID) (*model.Owner, error) {
 	var o model.Owner
 	if err := s.db.Collection("owners").FindOne(ctx, bson.M{"_id": id}).Decode(&o); err != nil {
@@ -99,7 +91,7 @@ func (s *MongoStore) FindByID(ctx context.Context, id bson.ObjectID) (*model.Own
 	return &o, nil
 }
 
-// FindZoneByID returns the zone, or ErrNotFound.
+// FindZoneByID looks up zone or returns ErrNotFound.
 func (s *MongoStore) FindZoneByID(ctx context.Context, id string) (*model.Zone, error) {
 	var z model.Zone
 	if err := s.db.Collection("zones").FindOne(ctx, bson.M{"_id": id}).Decode(&z); err != nil {
@@ -111,8 +103,7 @@ func (s *MongoStore) FindZoneByID(ctx context.Context, id string) (*model.Zone, 
 	return &z, nil
 }
 
-// FindActive returns an active authorization covering (drone, zone, at),
-// or ErrNotFound when there is none.
+// FindActive returns the covering permit or ErrNotFound.
 func (s *MongoStore) FindActive(ctx context.Context, droneID bson.ObjectID, zoneID string, at time.Time) (*model.Authorization, error) {
 	var a model.Authorization
 	filter := bson.M{
@@ -132,7 +123,7 @@ func (s *MongoStore) FindActive(ctx context.Context, droneID bson.ObjectID, zone
 	return &a, nil
 }
 
-// FindByEventID returns the stored detection, or ErrNotFound.
+// FindByEventID looks up stored detection or returns ErrNotFound.
 func (s *MongoStore) FindByEventID(ctx context.Context, eventID string) (*model.StoredDetection, error) {
 	var d model.StoredDetection
 	if err := s.db.Collection("detections").FindOne(ctx, bson.M{"event_id": eventID}).Decode(&d); err != nil {
@@ -144,14 +135,13 @@ func (s *MongoStore) FindByEventID(ctx context.Context, eventID string) (*model.
 	return &d, nil
 }
 
-// Insert persists a detection outcome.
+// Insert persists a detection.
 func (s *MongoStore) Insert(ctx context.Context, doc *model.StoredDetection) error {
 	_, err := s.db.Collection("detections").InsertOne(ctx, doc)
 	return err
 }
 
-// FindUnexported returns up to limit detections with export_status pending
-// or failed, oldest first.
+// FindUnexported returns up to limit pending/failed, oldest first.
 func (s *MongoStore) FindUnexported(ctx context.Context, limit int) ([]*model.StoredDetection, error) {
 	opts := options.Find().
 		SetSort(bson.D{{Key: "detected_at", Value: 1}}).
@@ -171,7 +161,7 @@ func (s *MongoStore) FindUnexported(ctx context.Context, limit int) ([]*model.St
 	return docs, nil
 }
 
-// SetExportStatus records export progress (pending/exported/failed).
+// SetExportStatus records pending/exported/failed.
 func (s *MongoStore) SetExportStatus(ctx context.Context, eventID, status string) error {
 	_, err := s.db.Collection("detections").UpdateOne(ctx,
 		bson.M{"event_id": eventID},

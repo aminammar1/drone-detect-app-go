@@ -1,8 +1,4 @@
-// Package identity resolves which registered drone (if any) a detection shows.
-//
-// M5 implements the full resolver from DESCRIPTION.md section 4: explicit
-// identifier, beacon correlation by zone and event-time window, and the
-// visual cross-check. See resolver.go for the algorithm.
+// Package identity resolves detections per DESCRIPTION.md section 4.
 package identity
 
 import (
@@ -13,11 +9,7 @@ import (
 	"drone-detect-app/server/internal/store"
 )
 
-// Result is the resolver output: exactly one candidate, none, ambiguous,
-// or a visual mismatch. Serial is always the claimed serial when the event
-// carries an explicit identifier, even if it is not registered (the
-// decision step then reports "identifier not registered"). For beacon
-// matches, Serial is set only when exactly one candidate remains.
+// Result is resolver output; unregistered explicit claims keep Serial for the decision step.
 type Result struct {
 	Method     string
 	Outcome    string
@@ -27,16 +19,15 @@ type Result struct {
 	Confidence float64
 }
 
-// Resolver maps a detection to an identity Result.
+// Resolver maps a detection to a Result.
 type Resolver interface {
 	Resolve(ctx context.Context, det *model.Detection) (Result, error)
 }
 
-// Compile-time check that the store satisfies the resolver's needs.
+// Wiring check against MongoStore.
 var _ store.Drones = (*store.MongoStore)(nil)
 
-// droneLookup is the resolver's only database need: serial -> registration.
-// A serial with no row is still a candidate (decision: "not registered").
+// droneLookup maps serial to registration; unknown serials stay candidates.
 func lookupDrone(ctx context.Context, drones store.Drones, serial string) (*model.Drone, error) {
 	drone, err := drones.FindBySerial(ctx, serial)
 	if err != nil {

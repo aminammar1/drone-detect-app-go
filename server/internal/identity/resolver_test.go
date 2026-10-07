@@ -11,7 +11,7 @@ import (
 	"drone-detect-app/server/internal/store"
 )
 
-// fakeDrones serves registrations from a map; missing serials are unregistered.
+// fakeDrones serves a map; missing serials are unregistered.
 type fakeDrones struct {
 	bySerial map[string]*model.Drone
 }
@@ -178,7 +178,7 @@ func TestCorrelator(t *testing.T) {
 		addBeacon(buf, "QUAD-1", "north-gate", at)
 		addBeacon(buf, "QUAD-2", "north-gate", at)
 		det := detection("north-gate", at)
-		det.Visual = visual("fixed_wing", "", 0.2, 0) // would mismatch both, but too weak
+		det.Visual = visual("fixed_wing", "", 0.2, 0) // Too weak to count.
 		r := newResolver(drones, buf)
 		r.VisualMinConf = 0.5
 		got, err := r.Resolve(context.Background(), det)
@@ -191,7 +191,7 @@ func TestCorrelator(t *testing.T) {
 		drones, buf, at := testSetup()
 		addBeacon(buf, "QUAD-1", "north-gate", at)
 		det := detection("north-gate", at)
-		det.Visual = visual("quadcopter", "anafi", 0.88, 0.61) // case-insensitive family
+		det.Visual = visual("quadcopter", "anafi", 0.88, 0.61) // Family is case-insensitive.
 		got, err := newResolver(drones, buf).Resolve(context.Background(), det)
 		require.NoError(t, err)
 		require.Equal(t, model.IdentityIdentified, got.Outcome)

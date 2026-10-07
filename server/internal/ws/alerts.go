@@ -21,15 +21,7 @@ func marshalAlert(alert *model.Alert) []byte {
 	return raw
 }
 
-// AlertsDeps wires /ws/alerts. No globals.
-//
-// Token, when non-empty, requires alert clients to authenticate. Browsers
-// cannot set headers on a WebSocket handshake, so ?token= is accepted; bots
-// may also use X-Alert-Token or Authorization: Bearer. Empty disables auth.
-//
-// QueueSize bounds each client's send buffer. Broadcast never blocks: a
-// client whose buffer is full is evicted, so a slow reader cannot stall the
-// pipeline or other clients.
+// AlertsDeps injects /ws/alerts; ?token= exists because browsers can't set WS headers. Full buffers evict, never block.
 type AlertsDeps struct {
 	Hub       *Hub
 	Logger    *slog.Logger
@@ -37,18 +29,15 @@ type AlertsDeps struct {
 	QueueSize int
 }
 
-// DefaultAlertQueueSize is used when Deps.QueueSize <= 0.
+// DefaultAlertQueueSize applies when QueueSize <= 0.
 const DefaultAlertQueueSize = 64
 
-// AlertsHandler upgrades alert subscribers and registers them on the hub.
-// It is stateless and reconnect-friendly: a client may reconnect at any time
-// with backoff; no resume token is needed because alerts are ephemeral
-// (persisted detections remain queryable in MongoDB).
+// AlertsHandler registers subscribers; stateless, alerts are ephemeral.
 func AlertsHandler(hub *Hub, logger *slog.Logger) gin.HandlerFunc {
 	return AlertsHandlerWithDeps(AlertsDeps{Hub: hub, Logger: logger})
 }
 
-// AlertsHandlerWithDeps is the production handler with auth + queue options.
+// AlertsHandlerWithDeps adds auth and queue sizing.
 func AlertsHandlerWithDeps(deps AlertsDeps) gin.HandlerFunc {
 	if deps.Logger == nil {
 		deps.Logger = slog.Default()
@@ -74,7 +63,7 @@ func AlertsHandlerWithDeps(deps AlertsDeps) gin.HandlerFunc {
 	}
 }
 
-// checkAlertToken accepts ?token=, X-Alert-Token, or Authorization: Bearer.
+// checkAlertToken accepts ?token=, X-Alert-Token, or Bearer.
 func checkAlertToken(c *gin.Context, want string) bool {
 	if got := c.Query("token"); got != "" && got == want {
 		return true
@@ -97,12 +86,10 @@ func pumpAlerts(conn *websocket.Conn, client *alertClient, logger *slog.Logger) 
 	})
 	ticker := time.NewTicker(pingPeriod)
 	defer ticker.Stop()
-	// done closes when the peer goes away; the write loop must exit
-	// immediately (not on the next 30s ping) so hub.Count drops and the
-	// client can reconnect right away.
+	// Exit writes fast on disconnect so Count drops and reconnect works.
 	done := make(chan struct{})
 	go func() {
-		// Drain inbound frames (close/pong) so the peer's close is noticed.
+		// Drain inbound so peer close is noticed.
 		defer close(done)
 		defer conn.Close()
 		for {
