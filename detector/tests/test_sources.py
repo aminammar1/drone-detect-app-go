@@ -6,6 +6,7 @@ import pytest
 
 from detector.sources import (
     SourceError,
+    describe_sources,
     find_repo_root,
     resolve_image_sources,
     resolve_media_sources,
@@ -97,3 +98,46 @@ def test_folder_mixes_images_and_videos_sorted(tmp_path: Path) -> None:
 def test_missing_media_source_names_both_folders(tmp_path: Path) -> None:
     with pytest.raises(SourceError, match="Put test videos"):
         _media("videos", tmp_path)
+
+
+def test_filenames_with_spaces_resolve(tmp_path: Path) -> None:
+    _touch(tmp_path, "my clip.mp4", "a shot.png")
+    found = _media(str(tmp_path), tmp_path)
+    assert [s.path.name for s in found] == ["a shot.png", "my clip.mp4"]
+
+
+def test_describe_sources_numbers_entries(tmp_path: Path) -> None:
+    _touch(tmp_path, "b.mp4", "a.jpg")
+    found = _media(str(tmp_path), tmp_path)
+    text = describe_sources(found)
+    assert "1. image: a.jpg" in text
+    assert "2. video: b.mp4" in text
+    assert "[" not in text
+
+
+def test_bare_filename_resolves_inside_input_folders(tmp_path: Path) -> None:
+    videos = tmp_path / "videos"
+    images = tmp_path / "images"
+    videos.mkdir()
+    images.mkdir()
+    _touch(videos, "my clip.mp4")
+    _touch(images, "a shot.png")
+    (clip,) = resolve_media_sources(
+        "my clip.mp4", tmp_path / "images", tmp_path / "videos", tmp_path
+    )
+    assert clip.kind == "video"
+    (shot,) = resolve_media_sources(
+        "a shot.png", tmp_path / "images", tmp_path / "videos", tmp_path
+    )
+    assert shot.kind == "image"
+
+
+def test_combined_keyword_lists_both_folders(tmp_path: Path) -> None:
+    videos = tmp_path / "videos"
+    images = tmp_path / "images"
+    videos.mkdir()
+    images.mkdir()
+    _touch(videos, "b.mp4")
+    _touch(images, "a.jpg")
+    found = resolve_media_sources("media", tmp_path / "images", tmp_path / "videos", tmp_path)
+    assert [(s.path.name, s.kind) for s in found] == [("a.jpg", "image"), ("b.mp4", "video")]

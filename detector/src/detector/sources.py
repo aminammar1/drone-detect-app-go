@@ -1,13 +1,8 @@
-"""Source discovery for the detector (FR-D1, DESCRIPTION section 12).
+"""Media discovery (FR-D1, DESCRIPTION.md section 12).
 
-Lists folders at runtime, filters by extension, sorts by name. The `images/`
-and `videos/` folders are read-only inputs: never write there. A bare folder
-name (e.g. `--source images`) resolves relative to the repo root, so the CLI
-works both from the repo root and from `detector/`.
-
-M3 image helpers (`SourceImage`, `resolve_image_sources`) are kept as-is;
-`MediaSource` / `resolve_media_sources` add video files, webcam indexes, and
-RTSP/HTTP streams for M4.
+Runtime listing, extension-filtered, name-sorted. images//videos/ are
+read-only. Bare folder names resolve under the repo root, so the CLI works
+from the root or from detector/.
 """
 
 from dataclasses import dataclass
@@ -22,12 +17,12 @@ MediaKind = Literal["image", "video", "stream"]
 
 
 class SourceError(Exception):
-    """Bad `--source`: missing path, empty folder, or unsupported file."""
+    """Bad --source: missing path, empty folder, or unsupported file."""
 
 
 @dataclass(frozen=True)
 class SourceImage:
-    """One input image: absolute path, repo-relative URI, and sequence index."""
+    """Absolute path plus repo-relative URI for the event."""
 
     path: Path
     uri: str
@@ -35,7 +30,7 @@ class SourceImage:
 
 
 def find_repo_root(start: Path) -> Path:
-    """Walk up from `start` until a directory containing PROJECT.md is found."""
+    """Repo root marker is PROJECT.md."""
     for candidate in (start, *start.parents):
         if (candidate / "PROJECT.md").is_file():
             return candidate
@@ -43,7 +38,7 @@ def find_repo_root(start: Path) -> Path:
 
 
 def resolve_under_root(raw: str, repo_root: Path) -> Path:
-    """Resolve a configured path: as given, else relative to the repo root."""
+    """As given if absolute/existing, else under the repo root."""
     path = Path(raw).expanduser()
     if path.is_absolute() or path.exists():
         return path
@@ -51,7 +46,7 @@ def resolve_under_root(raw: str, repo_root: Path) -> Path:
 
 
 def _as_uri(path: Path, repo_root: Path) -> str:
-    """Event `source.uri`: forward slashes, relative to the repo root when possible."""
+    """Event source.uri: posix, repo-relative when possible."""
     try:
         return path.resolve().relative_to(repo_root.resolve()).as_posix()
     except ValueError:
@@ -59,12 +54,7 @@ def _as_uri(path: Path, repo_root: Path) -> str:
 
 
 def resolve_image_sources(source: str, images_dir: Path, repo_root: Path) -> list[SourceImage]:
-    """Turn `--source` into an ordered list of images.
-
-    `source` may be a single image file or a folder (default: IMAGES_DIR).
-    Unsupported or unreadable files are skipped by the caller with a warning;
-    a missing path or an empty folder is a hard error with guidance.
-    """
+    """Single image file or folder. Missing/empty is fatal; bad files are caller-skipped."""
     candidate = Path(source).expanduser()
     if not candidate.is_absolute() and not candidate.exists():
         under_root = repo_root / source
@@ -99,11 +89,7 @@ def resolve_image_sources(source: str, images_dir: Path, repo_root: Path) -> lis
 
 @dataclass(frozen=True)
 class MediaSource:
-    """One input: image file, video file, or live stream.
-
-    `ref` is the `cv2.VideoCapture` target: a file path, a stream URL, or a
-    webcam index. `uri` is the event `source.uri`.
-    """
+    """cv2 target in ref; wire path in uri."""
 
     kind: MediaKind
     ref: str | int
@@ -121,20 +107,57 @@ def _resolve_candidate(source: str, repo_root: Path) -> Path:
     return candidate
 
 
+#: Combined keyword for the picker: both input folders in one list.
+COMBINED_SOURCES = frozenset({"media", "all", "both", "videos+images", "images+videos"})
+
+
+def _scan_folder(folder: Path, repo_root: Path) -> list[Path]:
+    """Supported media files in one folder, sorted by name. Missing dir is empty."""
+    if not folder.is_dir():
+        return []
+    return sorted(
+        (
+            p
+            for p in folder.iterdir()
+            if p.is_file() and p.suffix.lower() in (IMAGE_EXTENSIONS | VIDEO_EXTENSIONS)
+        ),
+        key=lambda p: p.name,
+    )
+
+
 def resolve_media_sources(
     source: str, images_dir: Path, videos_dir: Path, repo_root: Path
 ) -> list[MediaSource]:
-    """Turn `--source` into an ordered list of images, videos, or streams.
-
-    Accepts a webcam index (`"0"`), a stream URL (`rtsp://…`, `http(s)://…`),
-    a single media file, or a folder scanned for images and videos at runtime.
-    """
+    """Webcam index, stream URL, single file, folder scan, or both folders."""
     text = source.strip()
     if text.isdigit():
         return [MediaSource(kind="stream", ref=int(text), uri=f"webcam:{text}", path=None, index=0)]
     if text.lower().startswith(STREAM_SCHEMES):
         return [MediaSource(kind="stream", ref=text, uri=text, path=None, index=0)]
+    if text.lower() in COMBINED_SOURCES:
+        images_root = resolve_under_root(str(images_dir), repo_root)
+        videos_root = resolve_under_root(str(videos_dir), repo_root)
+        files = _scan_folder(videos_root, repo_root) + _scan_folder(images_root, repo_root)
+        files = sorted(files, key=lambda p: p.name)
+        if not files:
+            raise SourceError(
+                f"no supported images or videos in {videos_root} or {images_root}. Put "
+                ".mp4/.avi/.mov/.mkv/.webm videos or .jpg/.jpeg/.png/.bmp/.webp "
+                "images there; a single file, webcam index, or stream URL also works."
+            )
+        return [_media_file(p.resolve(), repo_root, i) for i, p in enumerate(files)]
     candidate = _resolve_candidate(source, repo_root)
+    if not candidate.exists():
+        # Bare file name (e.g. VIDEO="my clip.mp4"): look inside the input folders.
+        bare = Path(source.strip()).name
+        for folder in (
+            resolve_under_root(str(videos_dir), repo_root),
+            resolve_under_root(str(images_dir), repo_root),
+        ):
+            named = folder / bare
+            if named.is_file():
+                candidate = named
+                break
     if not candidate.exists():
         raise SourceError(
             f"source not found: {source!r}. Put test videos in {videos_dir} "
@@ -174,3 +197,15 @@ def _media_file(path: Path, repo_root: Path, index: int) -> MediaSource:
     return MediaSource(
         kind=kind, ref=str(path), uri=_as_uri(path, repo_root), path=path, index=index
     )
+
+
+def describe_sources(media: list[MediaSource]) -> str:
+    """Numbered list for --list-sources and the picker. Plain text, no markdown."""
+    lines = []
+    for i, item in enumerate(media, start=1):
+        if item.kind == "stream":
+            detail = str(item.ref)
+        else:
+            detail = item.uri
+        lines.append(f"{i}. {item.kind}: {detail}")
+    return "\n".join(lines)

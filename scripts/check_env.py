@@ -1,10 +1,4 @@
-"""Preflight check: verifies every prerequisite for `make server` / `make yolo`.
-
-Usage (repo root):  detector/.venv/Scripts/python.exe scripts/check_env.py
-                    make check
-Stdlib only — runs on any Python. Exit 0 = ready, 1 = something required
-is missing (each failure prints its fix).
-"""
+"""Preflight for make server / make yolo. Stdlib only. Exit 0 = ready, 1 = missing requirement."""
 
 from __future__ import annotations
 
@@ -23,7 +17,7 @@ MEDIA_EXTS = {
     "images": {".jpg", ".jpeg", ".png", ".bmp", ".webp"},
 }
 
-results: list[tuple[str, str, str]] = []  # (status, name, detail)
+results: list[tuple[str, str, str]] = []
 
 
 def record(status: str, name: str, detail: str = "") -> None:
@@ -51,7 +45,7 @@ def check_tool(name: str, version_args: list[str], fix: str, required: bool = Tr
 
 
 def find_uv() -> str | None:
-    """uv on PATH first, else the well-known install locations."""
+    """PATH first, else known install locations."""
     found = shutil.which("uv")
     if found:
         return found

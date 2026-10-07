@@ -44,7 +44,7 @@ function Use-PortEnv {
 }
 
 function Use-WeightsFallback {
-  # No fine-tuned drone.pt yet (M8 needs a labeled dataset): fall back to the
+  # No fine-tuned drone.pt yet (needs a labeled dataset): fall back to the
   # pretrained stand-in so the live YOLO demo still runs. Remove this once
   # detector/models/drone.pt is trained (docs/TRAINING.md).
   if (-not (Test-Path "$Root\detector\models\drone.pt")) {

@@ -1,15 +1,7 @@
-"""Evaluate detector weights on `images/` and `videos/` (M8).
+"""Score weights on images/ and videos/ (DESCRIPTION.md section 10).
 
-Reports detections per image and false positives per minute on video. On a
-drone-free video every box is a false positive, so FP/min measures how noisy
-the weights are before fine-tuning (DESCRIPTION.md section 10).
-
-Run from `detector/`::
-
-    .\\.venv\\Scripts\\python.exe tools\\evaluate.py --source ..\\videos --weights yolo26n.pt
-    .\\.venv\\Scripts\\python.exe tools\\evaluate.py --source ..\\images --target-classes drone
-
-Inputs are read-only; nothing is written to `images/` or `videos/`.
+Per-image box counts; per-video FP/min (drone-free video: every box is FP).
+Inputs are read-only.
 """
 
 from __future__ import annotations
@@ -21,7 +13,7 @@ from pathlib import Path
 
 import typer
 
-# Allow `python tools/evaluate.py` from detector/ without installing the package.
+# sys.path so `python tools/evaluate.py` works without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import cv2
@@ -34,14 +26,14 @@ app = typer.Typer(help="Evaluate YOLO weights on images/ and videos/.")
 
 
 def fp_per_minute(total_boxes: int, duration_s: float) -> float:
-    """False positives per minute. Zero duration yields 0.0 (no crash)."""
+    """FP/min; zero duration is 0.0, never a crash."""
     if duration_s <= 0:
         return 0.0
     return total_boxes / (duration_s / 60.0)
 
 
 def scaled_total(counted: int, stride: int) -> int:
-    """Extrapolate a strided sample to the full frame count."""
+    """Extrapolate a strided sample to the full count."""
     if stride <= 1:
         return counted
     return counted * stride
