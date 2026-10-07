@@ -3,8 +3,7 @@
 # Install `make` on Windows first (pick one):
 #   choco install make            # Chocolatey (then use `make`)
 #   winget install GnuWin32.Make   # Winget (then use `make`)
-# ...or skip make entirely and use the same shortcuts without installing
-# anything: .\scripts\run-server.ps1  and  .\scripts\run-yolo.ps1
+# Everything runs through make; there are no script wrappers.
 #
 # Copy-paste demo (two terminals, repo root):
 #   make seed                       # wipe + re-create mock data (once)
@@ -57,7 +56,7 @@ export BEACON_WS_URL := ws://localhost:$(PORT)/ws/beacons
 ifeq ($(wildcard detector/models/drone.pt),)
 export YOLO_WEIGHTS := yolo26n.pt
 export YOLO_TARGET_CLASSES := airplane
-export YOLO_CONF := 0.1
+export YOLO_CONF := 0.35
 endif
 
 # Resolve which source the yolo targets run on (SOURCE > VIDEO > IMAGE > folder).
@@ -141,7 +140,7 @@ MINFRAMES_FLAG :=
 endif
 PERF_FLAGS := $(CONF_FLAG) $(IMGSZ_FLAG) $(STRIDE_FLAG) $(MINFRAMES_FLAG)
 
-.PHONY: help check seed clean-db server sim fake yolo yolo-images yolo-pick yolo-pick-images yolo-list yolo-list-images evaluate test
+.PHONY: help check gpu-check seed clean-db server dashboard sim fake yolo yolo-images yolo-pick yolo-pick-images yolo-list yolo-list-images webcam evaluate test
 
 help: ## Show this list.
 	@echo Targets (PORT=$(PORT), SCENARIO=$(SCENARIO)):
@@ -156,6 +155,9 @@ help: ## Show this list.
 	@echo   make yolo-list-images  list image sources without running YOLO
 	@echo   make sim             preload Remote ID beacons from SCENARIO
 	@echo   make fake            scripted detections from SCENARIO (no YOLO needed)
+	@echo   make webcam          live YOLO on webcam 0 (q quits the window)
+	@echo   make dashboard       open the live alerts page in a browser
+	@echo   make gpu-check       show torch device (CUDA expected on NVIDIA GPUs)
 	@echo   make evaluate        FP-min probe on videos folder
 	@echo   make test            go test + pytest
 	@echo   make check           verify every prerequisite (run this first)
@@ -163,6 +165,9 @@ help: ## Show this list.
 
 check: ## Verify every prerequisite (run this first).
 	$(PYTHON) scripts/check_env.py
+
+gpu-check: ## Show the torch device (expect cuda=True on NVIDIA GPUs).
+	$(PYTHON) -c "import torch; print('cuda=', torch.cuda.is_available())"
 
 seed: ## Wipe + re-create mock data (uv run: standalone script, own deps).
 	$(UV) run tools/seed_db.py
@@ -172,6 +177,9 @@ clean-db: ## Drop the drone_detect_app database (clean slate, no re-seed).
 
 server: ## Go server (leave running).
 	cd server && go run ./cmd/server
+
+dashboard: ## Open the live alerts page in a browser.
+	$(PYTHON) -m webbrowser http://localhost:$(PORT)/
 
 sim: ## Preload Remote ID beacons from the scenario (no YOLO needed).
 	$(UV) run tools/remote_id_sim.py --scenario $(SCENARIO) --mode preload
@@ -196,6 +204,9 @@ yolo-list: ## List video sources without running YOLO.
 
 yolo-list-images: ## List image sources without running YOLO.
 	cd detector && $(DETECTOR_PY) -m detector.main --source "$(YOLO_IMG_SRC)" --list-sources
+
+webcam: ## Live YOLO on webcam 0 (leave running, q quits the window).
+	cd detector && $(DETECTOR_PY) -m detector.main --source 0 --clock wall --display --max-fps $(MAXFPS) $(PERF_FLAGS)
 
 evaluate: ## FP/min probe on videos\.
 	cd detector && $(DETECTOR_PY) tools/evaluate.py --source $(VIDEOS) --weights yolo26n.pt --target-classes drone

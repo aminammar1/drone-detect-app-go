@@ -129,15 +129,17 @@ cd detector
 .\detector\.venv\Scripts\python.exe tools\fake_detector.py --scenario scenarios\demo1.json
 ```
 
-### Demo helpers
+### Demo helpers (everything runs through make)
 
 ```powershell
-.\scripts\demo.ps1 check
-.\scripts\demo.ps1 seed
-.\scripts\demo.ps1 server
-.\scripts\demo.ps1 sim
-.\scripts\demo.ps1 fake
-.\scripts\demo.ps1 dashboard
+make check      # mongo, port, ADC, sheet reminder
+make gpu-check  # torch device (expect cuda=True on NVIDIA GPUs)
+make seed       # wipe + re-create mock data
+make server     # Go server (leave running)
+make sim        # preload Remote ID beacons
+make fake       # scripted detections, checks acks
+make dashboard  # open the live page in a browser
+make webcam     # live YOLO on webcam 0 (q quits)
 ```
 
 ## How the system works
