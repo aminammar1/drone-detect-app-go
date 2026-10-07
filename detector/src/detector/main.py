@@ -688,21 +688,27 @@ def main(
     if min_frames is not None and min_frames < 1:
         typer.echo("error: --min-frames must be >= 1.", err=True)
         raise typer.Exit(code=2)
-    asyncio.run(
-        _run(
-            source,
-            clock,
-            identifier_serial,
-            display,
-            max_fps,
-            pick,
-            list_sources,
-            conf,
-            imgsz,
-            stride,
-            min_frames,
+    try:
+        asyncio.run(
+            _run(
+                source,
+                clock,
+                identifier_serial,
+                display,
+                max_fps,
+                pick,
+                list_sources,
+                conf,
+                imgsz,
+                stride,
+                min_frames,
+            )
         )
-    )
+    except KeyboardInterrupt:
+        # Ctrl+C during a run: _run's finally already closed the sender and
+        # the windows, so just exit quietly instead of dumping a traceback.
+        typer.echo("stopped by user.")
+        raise typer.Exit(code=130)
 
 
 if __name__ == "__main__":

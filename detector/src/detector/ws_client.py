@@ -71,7 +71,7 @@ class DetectorClient:
             self._queue.task_done()
             self._queue.put_nowait((event_id, payload))
 
-    async def drain(self, timeout: float = 15.0) -> bool:
+    async def drain(self, timeout: float = 60.0) -> bool:
         """Block until queued events are acked; False on timeout."""
         try:
             await asyncio.wait_for(self._queue.join(), timeout=timeout)
