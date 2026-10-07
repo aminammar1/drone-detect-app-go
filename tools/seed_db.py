@@ -1,14 +1,7 @@
-"""Seed mock data for the Drone Detect App (M1).
+"""Seed mock DB per DESCRIPTION.md section 2.
 
-Creates the collections, indexes, and mock data exactly as defined in
-DESCRIPTION.md section 2, including airframe_type and model_family.
-
-Usage (PowerShell, from the repo root):
-    uv run tools\\seed_db.py          # wipe and re-create the database
-    uv run tools\\seed_db.py --keep   # add missing rows without wiping
-
-The script is deterministic (fixed random seed), so re-running it without
---keep produces the same dataset every time.
+Wipe and re-create by default; --keep adds missing rows. Deterministic
+fixed seed, so a fresh run always yields the same dataset.
 """
 
 # /// script
@@ -32,9 +25,7 @@ N_DRONES = 50
 N_OWNERS = 25
 SEED = 20260609
 
-# Real manufacturer/model catalog. airframe_type and model_family are the
-# visually checkable attributes used by the identity resolver, so a model
-# must always map to its real airframe (e.g. eBee X is fixed_wing).
+# airframe/family feed the resolver; keep each model on its real airframe.
 MODEL_CATALOG: list[dict[str, object]] = [
     {
         "mfr": "DJI",
@@ -248,7 +239,7 @@ SERIAL_PREFIX = {
     "EMAX": "EMX",
 }
 
-# Drone indexes with a bad status or no Remote ID (by position in the list).
+# Positions with bad status or no Remote ID.
 STOLEN_IDX = {31, 32}
 REVOKED_STATUS_IDX = {33, 34}
 DECOMMISSIONED_IDX = {46}
@@ -256,15 +247,20 @@ NO_REMOTE_ID_IDX = {5, 20, 33, 38, 39, 46}
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Seed the drone_detect_app MongoDB database (M1).")
+    p = argparse.ArgumentParser(description="Seed the drone_detect_app MongoDB database.")
     p.add_argument("--keep", action="store_true", help="keep existing data, only add missing rows")
+    p.add_argument(
+        "--drop-only",
+        action="store_true",
+        help="drop the database and exit without seeding (clean slate)",
+    )
     p.add_argument("--mongo-uri", default=os.getenv("MONGO_URI", "mongodb://localhost:27017"))
     p.add_argument("--db", default=os.getenv("MONGO_DB", DB_NAME))
     return p.parse_args()
 
 
 def make_serial(rng: random.Random, mfr: str, used: set[str]) -> str:
-    """Plausible per-manufacturer serial number, unique within this run."""
+    """Plausible per-manufacturer serial, unique within the run."""
     while True:
         s = f"{SERIAL_PREFIX[mfr]}1F{rng.randint(10, 99)}JC{rng.randint(100, 999)}Q{rng.randint(100000, 999999):06d}"
         if s not in used:
@@ -279,12 +275,12 @@ def seed(mongo_uri: str, db_name: str, keep: bool) -> dict[str, int]:
     now = datetime.now(UTC)
 
     client: MongoClient = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-    client.admin.command("ping")  # fail loudly when MongoDB is not reachable
+    client.admin.command("ping")  # fail fast when MongoDB is down.
     db = client[db_name]
     if not keep:
         client.drop_database(db_name)
 
-    # --- owners (~25) ---
+    # --- owners ---
     owners_coll = db["owners"]
     owner_ids: list[ObjectId] = []
     owner_types = ["individual", "company", "government"]
@@ -305,7 +301,7 @@ def seed(mongo_uri: str, db_name: str, keep: bool) -> dict[str, int]:
         }
         owner_ids.append(owners_coll.insert_one(doc).inserted_id)
 
-    # --- zones (4, one no-fly) ---
+    # --- zones ---
     zones_coll = db["zones"]
     for z in ZONES:
         zones_coll.update_one(
@@ -321,7 +317,7 @@ def seed(mongo_uri: str, db_name: str, keep: bool) -> dict[str, int]:
             upsert=True,
         )
 
-    # --- drones (~50) + authorizations (the mix of cases) ---
+    # --- drones + authorizations: one range per decision branch ---
     drones_coll = db["drones"]
     authz_coll = db["authorizations"]
     used_serials = (
@@ -388,22 +384,22 @@ def seed(mongo_uri: str, db_name: str, keep: bool) -> dict[str, int]:
         ).inserted_id
         new_drone_ids.append(drone_id)
 
-        if i <= 9:  # fully authorized: active auth in every flyable zone
+        if i <= 9:  # active auth in every flyable zone
             for z in FLYABLE_ZONES:
                 add_auth(drone_id, z, active_from, active_to, "active")
-        elif 10 <= i <= 19:  # zone-limited: north-gate only
+        elif 10 <= i <= 19:  # north-gate only
             add_auth(drone_id, "north-gate", active_from, active_to, "active")
-        elif 20 <= i <= 25:  # expired authorization
+        elif 20 <= i <= 25:  # expired
             add_auth(drone_id, "north-gate", expired_from, expired_to, "active")
-        elif 26 <= i <= 30:  # revoked authorization
+        elif 26 <= i <= 30:  # revoked
             add_auth(drone_id, "north-gate", active_from, active_to, "revoked")
         elif 31 <= i <= 34:  # stolen/revoked drone, auth otherwise valid
             add_auth(drone_id, "north-gate", active_from, active_to, "active")
-        elif 35 <= i <= 37:  # authorized for another zone only
+        elif 35 <= i <= 37:  # other zone only
             add_auth(drone_id, "warehouse-yard", active_from, active_to, "active")
-        # 38-49: unauthorized (no authorizations), incl. one decommissioned.
+        # 38-49: no authorizations.
 
-    # --- indexes (exactly as DESCRIPTION.md section 2) ---
+    # --- indexes per DESCRIPTION.md section 2 ---
     drones_coll.create_index("serial_number", unique=True)
     drones_coll.create_index("owner_id")
     drones_coll.create_index("status")
@@ -425,11 +421,25 @@ def seed(mongo_uri: str, db_name: str, keep: bool) -> dict[str, int]:
     }
 
 
+def drop_database(mongo_uri: str, db_name: str) -> None:
+    """Drop only the app database (never anything else); used by `make clean-db`."""
+    client: MongoClient = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+    client.admin.command("ping")  # fail fast when MongoDB is down.
+    client.drop_database(db_name)
+
+
 def main() -> None:
     args = parse_args()
+    if args.drop_only:
+        try:
+            drop_database(args.mongo_uri, args.db)
+        except Exception as exc:  # fail fast, never pretend
+            raise SystemExit(f"clean failed: {exc}") from exc
+        print(f"database '{args.db}' dropped (clean slate — run `make seed` to re-create mock data)")
+        return
     try:
         counts = seed(args.mongo_uri, args.db, args.keep)
-    except Exception as exc:  # fail loudly, never pretend
+    except Exception as exc:  # fail fast, never pretend
         raise SystemExit(f"seed failed: {exc}") from exc
     mode = "kept existing data, added missing rows" if args.keep else "wiped and re-created"
     print(f"seed complete ({mode}) — database '{args.db}'")

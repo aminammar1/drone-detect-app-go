@@ -1,15 +1,8 @@
-"""Scenario-driven fake detector for M5 server tests (FR-T3).
+"""Fake detector for server tests (FR-T3, DESCRIPTION.md section 6).
 
-Reads the same scenario file as remote_id_sim.py (DESCRIPTION.md section 6)
-and sends one detection per appearance with the appearance's simulated
-`visual` and NO explicit identifier, so identity must come from beacon
-correlation. Each appearance carries its `expected` decision, which is
-checked against the ack. Also demonstrates idempotency (resends the first
-event) and validation (one deliberately invalid event expects an error).
-
-Run AFTER preloading beacons (server running, DB seeded):
-    uv run tools\\remote_id_sim.py --scenario scenarios\\demo1.json --mode preload
-    uv run tools\\fake_detector.py --scenario scenarios\\demo1.json
+Same scenario file as remote_id_sim.py. One detection per appearance,
+identifier none so identity comes from beacons. Checks the expected
+decision, an idempotent resend, and invalid-event rejection.
 """
 
 # /// script
@@ -46,7 +39,7 @@ def load_scenario(path: str) -> dict:
 
 
 def build_event(scenario: dict, appearance: dict, track_id: int) -> dict:
-    """One detection per appearance, early in its window, identifier always none."""
+    """Early in the window for beacon overlap; identifier always none."""
     detected_at = scenario["_start"] + timedelta(seconds=appearance["from_s"] + 0.5)
     event: dict = {
         "type": "detection",
@@ -115,7 +108,7 @@ async def run(args: argparse.Namespace) -> int:
                 f"{want:<13} {ack.get('decision')} ({ack.get('reason')})"
             )
 
-        # Idempotency: resend the first event verbatim, expect the same ack.
+        # Resend verbatim; server dedupes on event_id.
         assert first_event is not None
         await ws.send(json.dumps(first_event))
         ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
@@ -126,7 +119,7 @@ async def run(args: argparse.Namespace) -> int:
         print(f"[{'PASS' if same else 'FAIL'}] resend {first_event['event_id']}")
         failures += 0 if same else 1
 
-        # Validation: confidence outside [0,1] must get an error reply.
+        # Out-of-range confidence must get an error reply.
         bad = build_event(scenario, appearances[0], 999)
         bad["event_id"] = str(uuid.uuid4())
         bad["confidence"] = 2.0

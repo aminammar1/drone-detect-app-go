@@ -1,13 +1,7 @@
-"""Simulated Remote ID beacon source (FR-T4).
+"""Simulated Remote ID beacons (FR-T4, DESCRIPTION.md section 6).
 
-Reads a scenario file (DESCRIPTION.md section 6) and emits one beacon per
-`beacon_interval_s` for every appearance with `broadcasts_remote_id = true`.
-Beacon `timestamp` is EVENT time (`start_time + t`), so preloaded and paced
-runs correlate identically with detections.
-
-Usage (PowerShell, from the repo root, server running):
-    uv run tools\\remote_id_sim.py --scenario scenarios\\demo1.json --mode preload
-    uv run tools\\remote_id_sim.py --scenario scenarios\\demo1.json --mode realtime
+One beacon per beacon_interval_s per broadcasting appearance. Timestamps
+are event time, so preload and realtime correlate identically.
 """
 
 # /// script
@@ -56,7 +50,7 @@ def load_scenario(path: str) -> dict:
 
 
 def beacons_for(appearance: dict, scenario: dict) -> list[dict]:
-    """All beacons for one appearance, stamped with event-time timestamps."""
+    """All beacons for one appearance, stamped in event time."""
     if not appearance.get("broadcasts_remote_id", False):
         return []
     if not appearance.get("serial_number"):
@@ -90,7 +84,7 @@ async def send_all(beacons: list[dict], ws_url: str) -> None:
 
 
 async def send_realtime(scenario: dict, ws_url: str) -> None:
-    """Pace beacons with the wall clock: sim second t goes out at start+t."""
+    """Wall-clock pacing: sim second t goes out at start+t."""
     from websockets.asyncio.client import connect
 
     timeline: list[tuple[float, dict]] = []
