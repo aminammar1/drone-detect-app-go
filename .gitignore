@@ -12,6 +12,11 @@ secrets/
 # Server-local runtime dir (snapshots fallback) - never commit
 server/data/
 
+# Runtime detection snapshots (regenerated every run, can grow big) - never commit.
+# Showcase pictures live in screenshots/ instead (safe from snapshot cleanup).
+data/snapshots/*
+!data/snapshots/.gitkeep
+
 
 
 # Input media content (provided by owner, read-only) — keep the folders, ignore the files

@@ -41,14 +41,14 @@ The system supports:
 These are the two best detection snapshots captured by the detector pipeline:
 
 <p align="center">
-  <img src="./data/snapshots/2026-10-07/43b6ce22-d1b0-415b-97dc-a6c7da9f5f00.jpg" alt="YOLO detector detection snapshot 1" width="720" />
+  <img src="./screenshots/detection-1.jpg" alt="YOLO detector detection snapshot 1" width="720" />
 </p>
 
 <p align="center">
-  <img src="./data/snapshots/2026-10-07/805ead4f-9f80-4cbe-b217-547127bad08e.jpg" alt="YOLO detector detection snapshot 2" width="720" />
+  <img src="./screenshots/detection-2.jpg" alt="YOLO detector detection snapshot 2" width="720" />
 </p>
 
-`images/` and `videos/` stay read-only inputs; the runtime detection snapshots live under `data/snapshots/`.
+`images/` and `videos/` stay read-only inputs; the runtime detection snapshots live under `data/snapshots/` (gitignored — safe to delete any time).
 
 ## Architecture at a glance
 
