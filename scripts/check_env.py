@@ -105,6 +105,60 @@ def check_env_file() -> None:
         record("FAIL", ".env", "missing. Fix: Copy-Item .env.example .env")
 
 
+def read_dotenv() -> dict[str, str]:
+    values: dict[str, str] = {}
+    try:
+        text = (ROOT / ".env").read_text(encoding="utf-8")
+    except OSError:
+        return values
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def url_port(url: str) -> str:
+    """Port from ws://host:port/... ('' when absent or unparsable)."""
+    try:
+        host = url.split("://", 1)[1].split("/", 1)[0]
+        return host.rsplit(":", 1)[1] if ":" in host else ""
+    except IndexError:
+        return ""
+
+
+def check_detector_auth() -> None:
+    """The classic HTTP-403 trap: server token set, client not sending it."""
+    env = read_dotenv()
+    token = env.get("DETECTOR_TOKEN", "")
+    if token:
+        record("OK", "detector token", "set in .env (detector + fake send X-Detector-Token automatically)")
+    else:
+        record("OK", "detector token", "empty (auth disabled, fine for local dev)")
+    want = str(PORT)
+    for key in ("WS_URL", "BEACON_WS_URL"):
+        got = url_port(env.get(key, ""))
+        if got and got != want:
+            record(
+                "WARN",
+                f"{key} port",
+                f".env points at :{got} but `make` runs on PORT={want} — "
+                "non-make runs will talk to the wrong server",
+            )
+    if env.get("EXPORT_BACKEND", "csv") == "sheets" and not env.get("GOOGLE_SHEET_ID", ""):
+        record("FAIL", "sheets export", "EXPORT_BACKEND=sheets but GOOGLE_SHEET_ID is empty")
+    identified_only = env.get("EXPORT_IDENTIFIED_ONLY", "true").lower() not in ("0", "false", "no")
+    if identified_only:
+        record(
+            "WARN" if not token else "OK",
+            "sheets filter",
+            "EXPORT_IDENTIFIED_ONLY=true: YOLO-only runs (no beacons) are "
+            "unidentified and stay out of the sheet — run `make sim` first or set it to false for testing",
+        )
+
+
 def check_media() -> None:
     for folder, exts in MEDIA_EXTS.items():
         d = ROOT / folder
@@ -147,6 +201,7 @@ def main() -> int:
     check_tool("mongosh", ["--version"], "install MongoDB Community Server (includes mongosh)")
     check_mongo()
     check_env_file()
+    check_detector_auth()
     check_venv_imports()
     check_media()
     check_port()
@@ -162,7 +217,10 @@ def main() -> int:
     if failed:
         print("Fix the [FAIL] lines above, then re-run: make check")
         return 1
-    print("Ready: make seed && make server  +  make yolo (second terminal)")
+    print(
+        "Ready: optionally run `uv run tools/seed_db.py --keep`, then `make server` + `make yolo` "
+        "(second terminal)"
+    )
     return 0
 
 

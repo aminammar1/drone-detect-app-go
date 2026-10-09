@@ -19,13 +19,40 @@ import os
 import sys
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Send scenario detections to the server.")
     p.add_argument("--scenario", default=os.getenv("SCENARIO_FILE", "scenarios/demo1.json"))
     p.add_argument("--ws-url", default=os.getenv("WS_URL", "ws://localhost:8080/ws/detector"))
+    p.add_argument("--detector-token", default=os.getenv("DETECTOR_TOKEN", ""))
     return p.parse_args()
+
+
+def load_env_token() -> str:
+    """DETECTOR_TOKEN from the repo .env when the env var is not set.
+
+    `uv run` does not load .env by itself, but the server reads it, so the
+    fake must too or its handshake gets HTTP 403.
+    """
+    candidates = (
+        Path(__file__).resolve().parent.parent / ".env",
+        Path.cwd() / ".env",
+    )
+    for cand in candidates:
+        try:
+            text = cand.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            if key.strip() == "DETECTOR_TOKEN":
+                return value.strip().strip('"').strip("'")
+    return ""
 
 
 def load_scenario(path: str) -> dict:
@@ -80,9 +107,11 @@ async def run(args: argparse.Namespace) -> int:
 
     failures = 0
     first_event: dict | None = None
+    token = args.detector_token or load_env_token()
+    headers = {"X-Detector-Token": token} if token else None
     print(f"scenario {scenario['scenario_id']}: {len(appearances)} appearances")
     print(f"{'appearance':<20} {'zone':<17} {'beacon':<20} {'want':<13} got")
-    async with connect(args.ws_url) as ws:
+    async with connect(args.ws_url, additional_headers=headers) as ws:
         for i, appearance in enumerate(appearances, start=1):
             event = build_event(scenario, appearance, i)
             if first_event is None:

@@ -263,7 +263,7 @@ func (s *detectorSession) process(ctx context.Context, det *model.Detection) {
 			DetectedAt: det.DetectedAt, ZoneID: det.ZoneID,
 			Confidence: det.Confidence, SnapshotPath: det.SnapshotPath,
 			Decision: ack.Decision, Reason: ack.Reason,
-			Identity: ack.Identity, Drone: droneInfo,
+			Identity: ack.Identity, Drone: droneInfo, Visual: det.Visual,
 		}
 		s.deps.Hub.Broadcast(alert)
 		if s.deps.Notifier != nil {

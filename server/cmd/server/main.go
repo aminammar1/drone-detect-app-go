@@ -48,11 +48,6 @@ func main() {
 		_ = client.Disconnect(context.Background())
 		os.Exit(1)
 	}
-	defer func() {
-		if err := client.Disconnect(context.Background()); err != nil {
-			logger.Error("mongodb disconnect failed", "err", err)
-		}
-	}()
 	logger.Info("mongodb connected", "db", cfg.MongoDB)
 
 	repos := store.New(client.Database(cfg.MongoDB))
@@ -76,14 +71,15 @@ func main() {
 	notifier := buildNotifier(logger, cfg)
 	exporter, fallback := buildExporter(ctx, logger, cfg)
 	worker := export.NewWorker(export.Deps{
-		Logger:        logger,
-		Primary:       exporter,
-		Fallback:      fallback,
-		Detections:    repos,
-		Drones:        repos,
-		Owners:        repos,
-		BatchSize:     cfg.ExportBatchSize,
-		FlushInterval: time.Duration(cfg.ExportFlushSeconds) * time.Second,
+		Logger:               logger,
+		Primary:              exporter,
+		Fallback:             fallback,
+		Detections:           repos,
+		Drones:               repos,
+		Owners:               repos,
+		BatchSize:            cfg.ExportBatchSize,
+		FlushInterval:        time.Duration(cfg.ExportFlushSeconds) * time.Second,
+		ExportIdentifiedOnly: cfg.ExportIdentifiedOnly,
 	})
 	exportCtx, cancelExport := context.WithCancel(context.Background())
 	defer cancelExport()
@@ -129,13 +125,19 @@ func main() {
 	}()
 
 	<-stopCtx.Done()
+	// Reset signal handling first: a second Ctrl+C force-kills instead of
+	// hanging inside the graceful window below.
+	stop()
 	logger.Info("shutting down")
 
+	exitCode := 0
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed", "err", fmt.Errorf("shutdown: %w", err))
-		os.Exit(1)
+		exitCode = 1
+	} else {
+		logger.Info("http server stopped")
 	}
 	// Must flush before Mongo closes; otherwise pending rows are lost.
 	cancelExport()
@@ -144,8 +146,18 @@ func main() {
 		logger.Info("export queue flushed")
 	case <-shutdownCtx.Done():
 		logger.Error("export flush timed out")
+		exitCode = 1
 	}
-	logger.Info("server stopped")
+	mongoCtx, mongoCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := client.Disconnect(mongoCtx); err != nil {
+		logger.Error("mongodb disconnect failed", "err", err)
+		exitCode = 1
+	} else {
+		logger.Info("mongodb disconnected")
+	}
+	mongoCancel()
+	logger.Info("server stopped", "exit_code", exitCode)
+	os.Exit(exitCode)
 }
 
 // buildNotifier returns the console sink; export stays separate.
@@ -174,7 +186,10 @@ func snapshotDir(cfg config.Config) string {
 
 // buildExporter selects the sink; sheets fails fast without auth/sheet ID (DESCRIPTION.md section 7).
 func buildExporter(ctx context.Context, logger *slog.Logger, cfg config.Config) (export.Exporter, *export.CSVExporter) {
-	const dir = "data/exports"
+	// Relative to server/ (the documented `cd server; go run ./cmd/server`
+	// working directory), so CSVs land in the repo-root data/exports next to
+	// the detector snapshots instead of a stray server/data copy.
+	const dir = "../data/exports"
 	switch cfg.ExportBackend {
 	case "csv":
 		csvExp, err := export.NewCSVExporter(dir)

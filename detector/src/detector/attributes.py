@@ -15,6 +15,21 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _normalize_family_label(label: str) -> str:
+    """Map dataset folder labels onto the family names stored in MongoDB."""
+    key = " ".join(label.casefold().replace("_", " ").replace("-", " ").split())
+    known = {
+        "dji mavic": "Mavic",
+        "mavic": "Mavic",
+        "dji phantom": "Phantom",
+        "phantom": "Phantom",
+        "dji inspire": "Inspire",
+        "inspire": "Inspire",
+        "no drone": "No Drone",
+    }
+    return known.get(key, label.strip())
+
+
 class ClsModel(Protocol):
     """YOLO-cls surface; faked in tests."""
 
@@ -80,7 +95,7 @@ class ModelFamilyClassifier:
             if top < 0:
                 continue
             names = getattr(self._model, "names", {})
-            family = str(names.get(top, top)).strip()
+            family = _normalize_family_label(str(names.get(top, top)))
             if conf >= self._min_conf and family and (best is None or conf > best[1]):
                 best = (family, conf)
         return best

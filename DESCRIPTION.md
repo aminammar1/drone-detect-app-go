@@ -17,10 +17,10 @@ Do not copy version numbers into other files.
 - **FR-D2** Run YOLO inference with configurable weights path, confidence threshold, and image size.
 - **FR-D3** Track detected drones across frames and assign a stable `track_id` (per run only; never an identity).
 - **FR-D4** Video files emit **one summary** `detection` event per confirmed track at end of footage (best-confidence frame; tracks seen in fewer than `TRACK_MIN_FRAMES` frames never emit). Streams (webcam/RTSP, which never end) keep the live path: one event per new track, re-emit after `TRACK_COOLDOWN_SECONDS` (default 30 s).
-- **FR-D5** Save an annotated snapshot to `data/snapshots/<session-date>/` (wall-clock run date, not event time) and include the path in the event. Snapshots whose server ack does not confirm `identity.result == identified` are deleted after the run; only identified drones keep snapshots and sheet rows.
+- **FR-D5** Save an annotated snapshot to `data/snapshots/<session-date>/` (wall-clock run date, not event time) and include the path in the event. Unidentified snapshots are deleted after the run unless they carry a visual family prediction; this preserves reviewable classifier output without treating it as identity. Sheet export still follows `EXPORT_IDENTIFIED_ONLY`.
 - **FR-D6** Maintain a WebSocket connection with automatic reconnect (exponential backoff). Buffer events in a bounded in-memory queue while disconnected.
 - **FR-D7** Time basis: `--clock video` sets `detected_at = scenario_start + position_in_video` (deterministic replay); `--clock wall` uses the real clock (live camera).
-- **FR-D8** Optionally attach `visual` attributes (`airframe_type`, `model_family` with confidences) when a classifier is available. Omit the field otherwise.
+- **FR-D8** Optionally attach `visual` attributes (`airframe_type` and/or `model_family`, each with confidence) when a classifier is available. A generic YOLO `drone` detection can carry a family-only prediction. The family classifier reports broad families (DJI Mavic, Phantom, Inspire, or No Drone), not exact product models or unique identities. Omit the field otherwise.
 - **FR-D9** Optionally attach an explicit `identifier` (CLI flag or mapping file). Otherwise send `identifier.kind = "none"`.
 
 ### Server (Go + Gin)
@@ -131,7 +131,7 @@ Index: compound `(drone_id, zone_id)`.
   "bbox": { "x1": 120, "y1": 80, "x2": 260, "y2": 170 },
   "frame_index": 1234,
   "snapshot_path": "data/snapshots/2026-06-09/uuid.jpg",
-  "visual": { "airframe_type": "quadcopter", "airframe_confidence": 0.88, "model_family": "Mavic", "model_confidence": 0.61 },
+  "visual": { "model_family": "Mavic", "model_confidence": 0.86 },
   "identifier": { "kind": "serial | remote_id | qr | none", "value": "…" },
   "identity": {
     "method": "explicit | beacon | beacon+visual | none",
@@ -212,7 +212,23 @@ Real Remote ID messages also carry position and altitude; add optional `lat`, `l
 ```
 
 ### 3.5 Server → Alert clients: `alert`
-Same fields as `ack`, plus `detected_at`, `zone_id`, `confidence`, `snapshot_path`.
+Same fields as `ack`, plus `detected_at`, `zone_id`, `confidence`, `snapshot_path`, and optional `visual` evidence copied from the detection event. `visual.model_family` is explicitly a visual prediction; it remains separate from `drone.model`, which is a registered database record.
+
+```json
+{
+  "type": "alert",
+  "event_id": "…",
+  "decision": "unidentified",
+  "reason": "no identifier and no Remote ID broadcast",
+  "identity": { "method": "none", "result": "none", "candidates": 0, "confidence": 0 },
+  "drone": null,
+  "detected_at": "2026-06-09T14:03:22Z",
+  "zone_id": "north-gate",
+  "confidence": 0.91,
+  "snapshot_path": "data/snapshots/2026-06-09/example.jpg",
+  "visual": { "model_family": "Mavic", "model_confidence": 0.86 }
+}
+```
 
 ### 3.6 Keep-alive
 Ping/pong on all sockets; the server closes connections idle for more than 60 s without a pong.
@@ -231,8 +247,9 @@ Input: a detection. Output: `{ method, result, drone | null, candidates, confide
                           and |beacon.timestamp - detected_at| <= BEACON_WINDOW_S
                           (deduplicated by serial_number)       (method = beacon)
 2. If candidate set is empty                      -> result = none
-3. If detection.visual is present and its confidence >= VISUAL_MIN_CONF:
-       look up candidate drones in the DB and compare airframe_type (and model_family if confident).
+3. If detection.visual has a confident airframe_type or model_family:
+       look up candidate drones in the DB and compare each available confident attribute.
+       All available confident attributes must match; missing attributes are skipped.
        a. If more than one candidate: keep only compatible ones   (method = beacon+visual)
        b. If exactly one candidate and it is incompatible          -> result = mismatch
 4. If exactly one candidate remains                -> result = identified
@@ -244,7 +261,7 @@ Rules:
 - A beacon whose serial is not in the DB still counts as a candidate; the decision step then returns `unidentified: not registered`.
 - Compare using event time only (`detected_at`, `beacon.timestamp`), never arrival time.
 - Late beacons: wait up to `RESOLVE_GRACE_MS` (default 1500) before finalizing `none`, so beacons that arrive slightly after the detection are still considered.
-- `airframe_type` comparison: exact match. `model_family`: case-insensitive match, only used when `model_confidence >= VISUAL_MIN_CONF`.
+- `airframe_type` comparison: exact match when `airframe_confidence >= VISUAL_MIN_CONF`. `model_family`: case-insensitive match when `model_confidence >= VISUAL_MIN_CONF`. Either attribute can be used on its own.
 
 ---
 
@@ -334,7 +351,9 @@ Only server-confirmed identified drones are queued for export while
 - On startup: re-queue detections with `export_status` `pending` or `failed`.
 
 **Columns (in order, short human headers):**
-`Time, Event, Zone, Camera, Track, Conf, Decision, Reason, Method, Serial, Maker, Model, Version, Family, Seen, Registered, Category, Owner, Sold, Snapshot`
+`Time, Event, Zone, Camera, Track, Conf, Decision, Reason, Method, Serial, Maker, Model, Version, Family, Visual model, Visual conf, Seen, Registered, Category, Owner, Sold, Snapshot`
+
+`Visual model` and `Visual conf` record the classifier prediction separately from the registered `Model` and `Family` fields. They may be blank when the classifier is disabled or below its confidence threshold.
 
 `Time` is `YYYY-MM-DD HH:MM:SS` UTC (Sheets parses it as a datetime). The server
 writes the header row once and formats it (bold, frozen top row, filter), so the

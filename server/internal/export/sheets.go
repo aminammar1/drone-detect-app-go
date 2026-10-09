@@ -19,7 +19,7 @@ type SheetsExporter struct {
 }
 
 // detectionsRange needs explicit tab+span; bare names 400, and the API never creates tabs.
-const detectionsRange = "detections!A:T"
+const detectionsRange = "detections!A:V"
 
 // NewSheetsExporter uses ADC when credsFile is empty, else a key file; missing sheet ID fails fast.
 func NewSheetsExporter(ctx context.Context, credsFile, sheetID string) (*SheetsExporter, error) {
@@ -68,7 +68,7 @@ func (e *SheetsExporter) Append(ctx context.Context, rows [][]any) error {
 }
 
 // headerRange is row 1 of the detections tab.
-const headerRange = "detections!A1:T1"
+const headerRange = "detections!A1:V1"
 
 // ensureHeader writes/formats row 1 once; matching sheets untouched.
 func (e *SheetsExporter) ensureHeader(ctx context.Context) error {

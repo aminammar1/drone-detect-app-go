@@ -9,13 +9,13 @@
   <img src="https://img.shields.io/badge/Sheets-CSV%20Export-34A853?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Sheets" />
 </p>
 
-A local drone detection and authorization system that combines computer vision, real-time event processing, and rule-based identity verification. The detector runs YOLO on live or recorded sources, the Go server resolves identity and authorization status, and every detection is exported to Sheets or CSV for auditing.
+A local drone detection and authorization system that combines computer vision, real-time event processing, and rule-based identity verification. The detector runs YOLO on live or recorded sources, the Go server resolves identity and authorization status, and MongoDB stores every detection. Identified detections are exported to Sheets or CSV by default.
 
 ## Tech stack
 
 | Layer | Technologies |
 | --- | --- |
-| Vision + detection | Python, `uv`, Ultralytics YOLO26, OpenCV, PyTorch |
+| Vision + detection | Python, `uv`, Ultralytics YOLO, OpenCV, PyTorch |
 | Live backend | Go, Gin, Gorilla WebSockets |
 | Identity + decisioning | Go server logic, MongoDB lookups, zone-aware authorization checks |
 | Storage | MongoDB Community Server |
@@ -36,16 +36,61 @@ The system supports:
 - Live alerts over WebSocket
 - Export to Google Sheets with CSV fallback
 
+**Visual model scope:** the detector first locates a generic `drone`, then an
+optional image classifier predicts a broad DJI family from the cropped box.
+The family prediction is labeled as visual evidence in the snapshot, live
+alerts, and sheet; the registered product model still comes from a serial or
+Remote ID match to MongoDB. The available showcase dataset does not support
+exact SKU claims such as “Mavic 3.”
+
 ## YOLO detector output
 
-These are the two best detection snapshots captured by the detector pipeline:
+These detector outputs show the model's actual `drone` predictions. They do
+not claim to recognize a product model from pixels:
+
+The following real-world Wikimedia Commons examples were added to `images/`
+and rendered with YOLO-only boxes. The box label remains `drone`; the source
+photo's exact product name is ground truth supplied by the photo page, not a
+prediction from this model. See [media credits and licenses](./docs/SHOWCASE_MEDIA.md).
 
 <p align="center">
-  <img src="./screenshots/detection-1.jpg" alt="YOLO detector detection snapshot 1" width="720" />
+  <img src="./screenshots/showcase-drone-web-dji-mavic-3.jpg" alt="YOLO drone detection on a DJI Mavic 3 photo" width="720" />
+</p>
+Credit: [HKesteloo, CC BY-SA 4.0](https://commons.wikimedia.org/wiki/File:DJI_Mavic_3.jpg).
+
+<p align="center">
+  <img src="./screenshots/showcase-drone-web-dji-phantom-4-in-flight.jpg" alt="YOLO drone detection on a DJI Phantom 4 in-flight photo" width="720" />
+</p>
+Credit: [Noah Wulf, CC BY-SA 4.0](https://commons.wikimedia.org/wiki/File:DJI_Phantom_4_Being_Released_from_Ship.jpg).
+
+<p align="center">
+  <img src="./screenshots/showcase-drone-web-dji-phantom-4k.jpg" alt="YOLO drone detection on a DJI Phantom 4K photo" width="720" />
+</p>
+Credit: [Suyash Dwivedi, CC BY-SA 4.0](https://commons.wikimedia.org/wiki/File:DJI_Phantom_4K_drone_in_action.jpg).
+
+These annotated images are adaptations of the credited photos and are shared
+under the same CC BY-SA terms. The input photos themselves remain gitignored.
+
+<p align="center">
+  <img src="./screenshots/showcase-drone-image.jpg" alt="Drone detection on a sample image" width="720" />
 </p>
 
 <p align="center">
-  <img src="./screenshots/detection-2.jpg" alt="YOLO detector detection snapshot 2" width="720" />
+  <img src="./screenshots/showcase-multiple-drones.jpg" alt="Multiple drone detections on a sample image" width="720" />
+</p>
+
+### Visual family prediction
+
+These examples also run a separate classifier on each YOLO crop. `VIS` marks
+the classifier's broad family prediction and confidence; it is not a registered
+product model or unique drone identity.
+
+<p align="center">
+  <img src="./screenshots/visual-family-hexacopter-drones-flying.jpg" alt="Drone boxes with visual family predictions" width="720" />
+</p>
+
+<p align="center">
+  <img src="./screenshots/visual-family-image.jpg" alt="Single drone box with visual family prediction" width="720" />
 </p>
 
 `images/` and `videos/` stay read-only inputs; the runtime detection snapshots live under `data/snapshots/` (gitignored — safe to delete any time).
@@ -99,21 +144,24 @@ Prerequisites:
 ### Option 1: use the provided automation
 
 ```powershell
-make seed
 make server
-make yolo
 ```
+
+If the database has no seeded records, use `uv run tools/seed_db.py --keep`
+from the repository root to add missing demo records without dropping the
+existing `drone_detect_app` database. `make seed` intentionally wipes and
+recreates that database.
 
 ### Option 2: run each service manually
 
 ```powershell
-# 1. Seed mock data
-.\detector\.venv\Scripts\python.exe tools\seed_db.py
+# 1. Add missing mock data without wiping existing records
+uv run tools\seed_db.py --keep
 
 # 2. Run the server
 cd server
 go run .\cmd\server
-# dashboard: http://localhost:8080/
+# dashboard: http://localhost:8080/ (manual run uses .env)
 # health: http://localhost:8080/health
 
 # 3. Run the detector
@@ -125,8 +173,8 @@ cd detector
 ### Simulated Remote ID and fake detections
 
 ```powershell
-.\detector\.venv\Scripts\python.exe tools\remote_id_sim.py --scenario scenarios\demo1.json --mode preload
-.\detector\.venv\Scripts\python.exe tools\fake_detector.py --scenario scenarios\demo1.json
+uv run tools\remote_id_sim.py --scenario scenarios\showcase.json --mode preload
+uv run tools\fake_detector.py --scenario scenarios\showcase.json
 ```
 
 ### Demo helpers (everything runs through make)
@@ -134,7 +182,7 @@ cd detector
 ```powershell
 make check      # mongo, port, ADC, sheet reminder
 make gpu-check  # torch device (expect cuda=True on NVIDIA GPUs)
-make seed       # wipe + re-create mock data
+make seed       # destructive: wipe + re-create mock data
 make server     # Go server (leave running)
 make sim        # preload Remote ID beacons
 make fake       # scripted detections, checks acks
@@ -142,12 +190,78 @@ make dashboard  # open the live page in a browser
 make webcam     # live YOLO on webcam 0 (q quits)
 ```
 
+### LinkedIn showcase walkthrough (Windows)
+
+Use three terminals from the repository root. First, run `make check` and
+confirm it ends with `Ready`. Start the server in Terminal 1:
+
+```powershell
+make server
+```
+
+Open the dashboard in a browser at `http://localhost:8000/` (or run
+`make dashboard`). In Terminal 2, run the detector on the supplied video:
+
+```powershell
+make yolo VIDEO="Imagine Seeing THIS Many DJI Drones Flying.mp4" STRIDE=2
+```
+
+The preview labels boxes with a visual family when the optional classifier
+returns one. Press `q`, press Escape, or close the preview window to stop the
+current video and the rest of the folder run. The video is a read-only input.
+Detections without a matching beacon appear as unidentified. After it finishes,
+run the scripted authorization flow in Terminal 3:
+
+```powershell
+make sim
+make fake
+```
+
+The simulator scenario is synthetic and tests the backend decisions: an
+authorized drone, a silent drone, a visual mismatch, a no-fly zone, ambiguous
+beacons, and an unregistered serial. `make fake` should report **9/9 checks
+passed**. This proves the event and authorization flow; it is not evidence
+that the camera visually recognized each registered model.
+
+For family-level visual recognition, the project includes a training path in
+[docs/TRAINING.md](./docs/TRAINING.md#1-assemble-the-dataset). After downloading
+and extracting the CC BY dataset and training `family.pt`, run:
+
+```powershell
+cd detector
+$env:ATTR_FAMILY_ENABLED = "true"
+uv run python -m detector.main --source "..\videos\Imagine Seeing THIS Many DJI Drones Flying.mp4" --clock video --display --stride 2
+```
+
+The annotated snapshots and dashboard show the visual family with its
+confidence separately from the registered drone identity. Because the source
+dataset is synthetic, treat this as a showcase prototype and avoid accuracy
+claims until it is evaluated on held-out real camera footage.
+On the project's real sample images, the current classifier has produced
+incorrect family guesses (including Mavic predicted as “No Drone”); always
+review the annotated result and label it as a prediction, not ground truth.
+
+To create image-only showcase artifacts without sending events to the server,
+run these commands from `detector/`:
+
+```powershell
+$env:ATTR_FAMILY_CONF = "0.75"
+uv run tools\render_family_showcase.py --source ..\images --output-dir ..\screenshots
+```
+
+For detector-only overlays on the credited real-world examples, omit the
+experimental family classifier:
+
+```powershell
+uv run tools\render_family_showcase.py --source ..\images\web-dji-mavic-3.jpg --output-dir ..\screenshots --detection-only
+```
+
 ## How the system works
 
 1. The detector reads frames from an image, video, or stream.
 2. YOLO identifies drone objects and emits a detection event.
 3. The server validates and enriches the event.
-4. It resolves identity using explicit identifiers, Remote ID beacons, and visual checks.
+4. It resolves identity using explicit identifiers or Remote ID beacons; visual attributes can verify or disambiguate a candidate.
 5. It looks up authorization for the zone and time of detection.
 6. It decides whether the drone is `authorized`, `unauthorized`, or `unidentified`.
 7. It publishes alerts and exports the record for auditing.

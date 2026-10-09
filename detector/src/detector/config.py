@@ -17,6 +17,10 @@ class Settings(BaseSettings):
 
     ws_url: str = Field(default="ws://localhost:8080/ws/detector")
     ws_queue_size: int = Field(default=100, gt=0)
+    # Shared secret for the server's X-Detector-Token check (DESCRIPTION.md
+    # section 9). Empty disables the check; must match the server's
+    # DETECTOR_TOKEN or the handshake is rejected with HTTP 403.
+    detector_token: str = Field(default="")
     yolo_weights: str = Field(default="./detector/models/drone.pt")
     yolo_target_classes: str = Field(default="drone")
     yolo_conf: float = Field(default=0.35, ge=0.0, le=1.0)
@@ -36,7 +40,7 @@ class Settings(BaseSettings):
     # Crop classifier for visual.model_family; off until family.pt is trained.
     attr_family_enabled: bool = Field(default=False)
     attr_family_weights: str = Field(default="./detector/models/family.pt")
-    attr_family_conf: float = Field(default=0.5, ge=0.0, le=1.0)
+    attr_family_conf: float = Field(default=0.75, ge=0.0, le=1.0)
 
 
 def get_settings() -> Settings:

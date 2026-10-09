@@ -192,6 +192,29 @@ func TestWorkerRequeueOnStartup(t *testing.T) {
 	require.Equal(t, 2, total)
 }
 
+func TestWorkerRequeueRespectsIdentifiedOnly(t *testing.T) {
+	primary := &scriptExporter{}
+	identified := testDoc("is-identified")
+	unidentified := testDoc("is-unidentified")
+	unidentified.Identity = model.Identity{Method: model.MethodBeacon, Result: model.IdentityNone}
+	st := &fakeStore{requeue: []*model.StoredDetection{identified, unidentified}}
+	w, _ := runWorker(t, Deps{
+		Logger: testLogger(), Primary: primary,
+		Detections: st, Drones: st, Owners: st,
+		BatchSize: 10, FlushInterval: 20 * time.Millisecond,
+		ExportIdentifiedOnly: true,
+	})
+	_ = w
+	require.Eventually(t, func() bool { return st.status("is-identified") == StatusExported },
+		3*time.Second, 10*time.Millisecond)
+	// The live enqueue gate must also hold across restarts: the unidentified
+	// row is never queued, so it keeps no export status at all.
+	require.Never(t, func() bool { return st.status("is-unidentified") != "" },
+		500*time.Millisecond, 20*time.Millisecond)
+	_, total := primary.snapshot()
+	require.Equal(t, 1, total)
+}
+
 func TestWorkerEnrichmentFailureStillExports(t *testing.T) {
 	primary := &scriptExporter{}
 	st := &fakeStore{} // No drone/owner; lookups return nil.

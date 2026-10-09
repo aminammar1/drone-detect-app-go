@@ -41,8 +41,8 @@ class Visual(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    airframe_type: str = Field(min_length=1)
-    airframe_confidence: float = Field(ge=0.0, le=1.0)
+    airframe_type: str | None = Field(default=None, min_length=1)
+    airframe_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     model_family: str | None = None
     model_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 

@@ -16,6 +16,7 @@ server/data/
 # Showcase pictures live in screenshots/ instead (safe from snapshot cleanup).
 data/snapshots/*
 !data/snapshots/.gitkeep
+data/training/
 
 
 
@@ -46,3 +47,5 @@ Thumbs.db
 
 # Agent tooling dependencies (skills themselves are committed)
 .opencode/node_modules/
+
+data/external-model-samples/

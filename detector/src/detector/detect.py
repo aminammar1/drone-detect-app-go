@@ -111,6 +111,11 @@ class Detector:
         """Inference image size, for latency logs."""
         return self._imgsz
 
+    @property
+    def model_names(self) -> set[str]:
+        """Lowercased class names the loaded weights actually predict."""
+        return set(self._names.values())
+
     @staticmethod
     def _resolve_weights(weights: Path, repo_root: Path) -> Path:
         """Existing file or pretrained name (auto-downloaded)."""
@@ -181,7 +186,10 @@ class Detector:
         predictor = getattr(self._model, "predictor", None)
         trackers = getattr(predictor, "trackers", None)
         if trackers:
-            trackers.clear()
+            # Ultralytics skips tracker initialization for persist=True when the
+            # list already exists, so clearing it makes the next video fail.
+            for tracker in trackers:
+                tracker.reset()
             logger.debug("tracker state reset")
 
     def _kept(self, cls_id: float, conf: float, xyxy: list[float]) -> Detection | None:
@@ -189,7 +197,11 @@ class Detector:
         if name not in self._targets:
             return None
         x1, y1, x2, y2 = (float(v) for v in xyxy)
-        return Detection(class_name=name, confidence=float(conf), bbox=(x1, y1, x2, y2))
+        # Stand-in weights (e.g. COCO airplane) are drone proxies: the box
+        # and the wire event must say "drone", never "airplane". After
+        # training, targets == {"drone"} and this is a no-op.
+        label = "drone" if self._targets != {"drone"} else name
+        return Detection(class_name=label, confidence=float(conf), bbox=(x1, y1, x2, y2))
 
 
 def track_color(track_id: int | None) -> tuple[int, int, int]:
@@ -211,25 +223,165 @@ def track_color(track_id: int | None) -> tuple[int, int, int]:
     return palette[int(track_id) % len(palette)]
 
 
-def annotate(frame_bgr: np.ndarray, detections: list[Detection]) -> np.ndarray:
-    """Annotate a copy; input untouched."""
+def annotate(
+    frame_bgr: np.ndarray,
+    detections: list[Detection],
+    labels: dict[int, str] | None = None,
+    visual_labels: dict[int, tuple[str, float]] | None = None,
+) -> np.ndarray:
+    """Annotate a copy; input untouched.
+
+    `labels` maps track_id to a registered model from the server. `visual_labels`
+    maps it to a classifier prediction; the word "visual" keeps that prediction
+    distinct from a registered identity.
+    """
     annotated = frame_bgr.copy()
+    occupied: list[tuple[int, int, int, int]] = []
+    font = cv2.FONT_HERSHEY_DUPLEX
+    height, width = annotated.shape[:2]
+    scale = min(1.0, max(0.72, min(width, height) / 720))
+    font_scale = 0.48 * scale
+    thickness = max(1, round(scale))
+    pad_x = round(10 * scale)
+    pad_y = round(7 * scale)
+    line_gap = round(5 * scale)
+
     for det in detections:
         x1, y1, x2, y2 = (int(v) for v in det.bbox)
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(width - 1, x2), min(height - 1, y2)
         track_id = getattr(det, "track_id", None)
         color = track_color(track_id if isinstance(track_id, int) else None)
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-        label = f"{det.class_name} {det.confidence:.2f}"
-        if track_id is not None:
-            label += f" id={track_id}"
-        cv2.putText(
+        box_thickness = max(1, round(min(width, height) / 520))
+        cv2.rectangle(
             annotated,
-            label,
-            (x1, max(0, y1 - 8)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
+            (x1, y1),
+            (x2, y2),
             color,
-            2,
+            box_thickness,
             cv2.LINE_AA,
         )
+        corner = max(8, min(20, round(min(x2 - x1, y2 - y1) * 0.18)))
+        for start, end in (
+            ((x1, y1), (x1 + corner, y1)),
+            ((x1, y1), (x1, y1 + corner)),
+            ((x2, y1), (x2 - corner, y1)),
+            ((x2, y1), (x2, y1 + corner)),
+            ((x1, y2), (x1 + corner, y2)),
+            ((x1, y2), (x1, y2 - corner)),
+            ((x2, y2), (x2 - corner, y2)),
+            ((x2, y2), (x2, y2 - corner)),
+        ):
+            cv2.line(annotated, start, end, color, box_thickness + 1, cv2.LINE_AA)
+
+        identified = labels.get(track_id) if labels and isinstance(track_id, int) else None
+        visual = (
+            visual_labels.get(track_id) if visual_labels and isinstance(track_id, int) else None
+        )
+        track_label = f"track #{track_id}" if isinstance(track_id, int) else "drone"
+        lines = [f"drone  ·  {det.confidence:.2f}  ·  {track_label}"]
+        if identified:
+            lines.append(f"registered  ·  {identified}")
+        if visual:
+            family = visual[0]
+            family_key = family.casefold().replace("_", " ")
+            if family_key == "no drone":
+                visual_name = "no family match"
+            else:
+                prefix = "" if family.casefold().startswith("dji ") else "DJI "
+                visual_name = f"{prefix}{family}"
+            lines.append(f"visual guess  ·  {visual_name}  {visual[1]:.2f}")
+        elif not identified:
+            lines.append("visual family  ·  pending")
+
+        max_text_width = max(40, width - 2 * pad_x - 8)
+        while font_scale > 0.28:
+            measured = [cv2.getTextSize(line, font, font_scale, thickness)[0][0] for line in lines]
+            if max(measured) <= max_text_width:
+                break
+            font_scale -= 0.025
+        if max(measured) > max_text_width:
+            shortened: list[str] = []
+            for line in lines:
+                while (
+                    line
+                    and cv2.getTextSize(line + "…", font, font_scale, thickness)[0][0]
+                    > max_text_width
+                ):
+                    line = line[:-1]
+                shortened.append((line + "…") if line else "…")
+            lines = shortened
+            measured = [cv2.getTextSize(line, font, font_scale, thickness)[0][0] for line in lines]
+
+        line_height = cv2.getTextSize("Ag", font, font_scale, thickness)[0][1]
+        baseline = cv2.getTextSize("Ag", font, font_scale, thickness)[1]
+        panel_width = max(measured) + 2 * pad_x + 4
+        panel_height = len(lines) * (line_height + line_gap) - line_gap + 2 * pad_y + baseline
+        panel_width = min(width, panel_width)
+        max_x = max(0, width - panel_width)
+        max_y = max(0, height - panel_height)
+        candidates = [
+            (x1, y1 - panel_height - 4),
+            (x1, y2 + 4),
+            (x2 - panel_width, y1 - panel_height - 4),
+            (x2 - panel_width, y2 + 4),
+            (x1, y1),
+        ]
+        candidates = [(min(max(0, x), max_x), min(max(0, y), max_y)) for x, y in candidates]
+
+        def overlap_area(
+            pos: tuple[int, int],
+            panel_width: int = panel_width,
+            panel_height: int = panel_height,
+        ) -> int:
+            px, py = pos
+            rect = (px, py, px + panel_width, py + panel_height)
+            return sum(
+                max(0, min(rect[2], other[2]) - max(rect[0], other[0]))
+                * max(0, min(rect[3], other[3]) - max(rect[1], other[1]))
+                for other in occupied
+            )
+
+        panel_x, panel_y = min(candidates, key=overlap_area)
+        occupied.append((panel_x, panel_y, panel_x + panel_width, panel_y + panel_height))
+        panel = annotated.copy()
+        cv2.rectangle(
+            panel,
+            (panel_x, panel_y),
+            (panel_x + panel_width, panel_y + panel_height),
+            (18, 27, 40),
+            -1,
+        )
+        cv2.addWeighted(panel, 0.92, annotated, 0.08, 0, annotated)
+        cv2.rectangle(
+            annotated,
+            (panel_x, panel_y),
+            (panel_x + panel_width, panel_y + panel_height),
+            color,
+            1,
+            cv2.LINE_AA,
+        )
+        cv2.rectangle(
+            annotated,
+            (panel_x, panel_y),
+            (panel_x + max(3, round(4 * scale)), panel_y + panel_height),
+            color,
+            -1,
+        )
+        text_y = panel_y + pad_y + line_height
+        for index, line in enumerate(lines):
+            text_color = (232, 240, 247) if index < len(lines) - 1 else (150, 230, 255)
+            if visual and line.startswith("visual guess"):
+                text_color = (120, 235, 255)
+            cv2.putText(
+                annotated,
+                line,
+                (panel_x + pad_x + 2, text_y),
+                font,
+                font_scale,
+                text_color,
+                thickness,
+                cv2.LINE_AA,
+            )
+            text_y += line_height + line_gap
     return annotated

@@ -25,11 +25,12 @@ func TestDashboardServesPage(t *testing.T) {
 	require.NoError(t, err)
 	body := string(raw)
 	require.Contains(t, body, "/ws/alerts")
-	require.Contains(t, body, ".badge.authorized")
-	require.Contains(t, body, ".badge.unauthorized")
-	require.Contains(t, body, ".badge.unidentified")
-	require.Contains(t, body, "identity")
-	require.Contains(t, body, "snapshot")
+	require.Contains(t, body, "Inference Studio")
+	require.Contains(t, body, "latest-image")
+	require.Contains(t, body, "Detection stream")
+	require.Contains(t, body, "score-meter")
+	require.Contains(t, body, "Visual family · experimental")
+	require.Contains(t, body, "Registered identity")
 }
 
 func TestHealthEndpoint(t *testing.T) {

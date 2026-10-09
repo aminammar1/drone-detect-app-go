@@ -205,4 +205,5 @@ type Alert struct {
 	Reason       string     `json:"reason"`
 	Identity     Identity   `json:"identity"`
 	Drone        *DroneInfo `json:"drone"`
+	Visual       *Visual    `json:"visual,omitempty"`
 }

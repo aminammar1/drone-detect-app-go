@@ -82,6 +82,18 @@ def main(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=2)
 
+    # COCO weights know no 'drone' class: asking for it scores a silent zero.
+    # Point at the stand-in instead (same fallback as `make yolo`).
+    missing = sorted(set(parse_target_classes(target_classes)) - detector.model_names)
+    if missing:
+        logger.warning(
+            "target classes %s are not predicted by %s (model knows: %s); "
+            "counts will be zero. Use e.g. --target-classes airplane with COCO weights.",
+            ", ".join(missing),
+            weights,
+            ", ".join(sorted(detector.model_names)),
+        )
+
     typer.echo(
         f"source: {source} ({len(media)} item(s)) weights={weights} classes={target_classes}"
     )

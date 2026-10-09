@@ -42,12 +42,14 @@ func testDrone() *model.Drone {
 }
 
 func TestColumnsExactOrder(t *testing.T) {
-	require.Len(t, Columns, 20)
+	require.Len(t, Columns, 22)
 	require.Equal(t, "Time", Columns[0])
 	require.Equal(t, "Method", Columns[8])
-	require.Equal(t, "Seen", Columns[14])
-	require.Equal(t, "Registered", Columns[15])
-	require.Equal(t, "Snapshot", Columns[19])
+	require.Equal(t, "Visual model", Columns[14])
+	require.Equal(t, "Visual conf", Columns[15])
+	require.Equal(t, "Seen", Columns[16])
+	require.Equal(t, "Registered", Columns[17])
+	require.Equal(t, "Snapshot", Columns[21])
 }
 
 func TestRowFull(t *testing.T) {
@@ -69,6 +71,8 @@ func TestRowFull(t *testing.T) {
 		"Mavic 3",
 		"v2",
 		"Mavic",
+		"Mavic", // visual family prediction
+		0.61,
 		"quadcopter", // seen
 		"quadcopter", // registered
 		"consumer",
@@ -86,7 +90,7 @@ func TestRowNoDroneNoVisual(t *testing.T) {
 	require.Len(t, got, len(Columns))
 	// Registration cells stay empty when unidentified.
 	require.Equal(t, "beacon+visual", got[8])
-	for _, i := range []int{9, 10, 11, 12, 13, 14, 15, 16, 17, 18} {
+	for _, i := range []int{9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20} {
 		require.Equal(t, "", got[i], "column %s", Columns[i])
 	}
 	require.Equal(t, "e2", got[1])

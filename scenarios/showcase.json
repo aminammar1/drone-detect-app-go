@@ -1,0 +1,76 @@
+{
+  "scenario_id": "showcase",
+  "start_time": "2026-06-09T14:00:00Z",
+  "zone_id": "north-gate",
+  "source_id": "showcase-simulator",
+  "beacon_interval_s": 1.0,
+  "appearances": [
+    {
+      "label": "authorized-survey",
+      "serial_number": "SEED008PF7Q163352",
+      "from_s": 3.0,
+      "to_s": 4.0,
+      "broadcasts_remote_id": true,
+      "visual": { "airframe_type": "quadcopter", "model_family": "Anafi" },
+      "expected": { "decision": "authorized", "reason": "authorized for zone north-gate" }
+    },
+    {
+      "label": "rogue-no-broadcast",
+      "serial_number": null,
+      "from_s": 12.0,
+      "to_s": 13.0,
+      "broadcasts_remote_id": false,
+      "visual": { "airframe_type": "quadcopter" },
+      "expected": { "decision": "unidentified", "reason": "no identifier and no Remote ID broadcast" }
+    },
+    {
+      "label": "spoofer",
+      "serial_number": "SEED002158Q115838",
+      "from_s": 21.0,
+      "to_s": 22.0,
+      "broadcasts_remote_id": true,
+      "visual": { "airframe_type": "fixed_wing", "model_family": "Disco" },
+      "expected": {
+        "decision": "unidentified",
+        "reason": "claimed identity does not match visual attributes (possible spoofing)"
+      }
+    },
+    {
+      "label": "no-fly-zone",
+      "serial_number": "SEED003158Q123757",
+      "zone_id": "airport-approach",
+      "from_s": 30.0,
+      "to_s": 31.0,
+      "broadcasts_remote_id": true,
+      "visual": { "airframe_type": "quadcopter", "model_family": "Matrice" },
+      "expected": { "decision": "unauthorized", "reason": "no-fly zone" }
+    },
+    {
+      "label": "two-at-once-a",
+      "serial_number": "SEED008PF7Q163352",
+      "from_s": 40.0,
+      "to_s": 42.0,
+      "broadcasts_remote_id": true,
+      "visual": { "airframe_type": "quadcopter", "model_family": "Anafi" },
+      "expected": { "decision": "unidentified", "reason": "multiple matching drones" }
+    },
+    {
+      "label": "two-at-once-b",
+      "serial_number": "SEED026PF7Q305894",
+      "from_s": 40.0,
+      "to_s": 42.0,
+      "broadcasts_remote_id": true,
+      "visual": { "airframe_type": "quadcopter", "model_family": "Anafi" },
+      "expected": { "decision": "unidentified", "reason": "multiple matching drones" }
+    },
+    {
+      "label": "unregistered",
+      "serial_number": "UNREGISTERED999",
+      "from_s": 51.0,
+      "to_s": 52.0,
+      "broadcasts_remote_id": true,
+      "visual": { "airframe_type": "quadcopter" },
+      "expected": { "decision": "unidentified", "reason": "identifier not registered" }
+    }
+  ]
+}

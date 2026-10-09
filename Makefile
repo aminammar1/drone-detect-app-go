@@ -13,7 +13,7 @@
 # Full list: `make help`.
 
 PORT ?= 8000
-SCENARIO ?= scenarios/demo1.json
+SCENARIO ?= scenarios/showcase.json
 # Source selection for YOLO runs (all optional, quoted: names may contain spaces):
 #   make yolo VIDEO="my clip.mp4"        single video file (bare name ok, searched in videos)
 #   make yolo IMAGE="shot.png"           single image file (bare name ok, searched in images)
@@ -53,10 +53,13 @@ export BEACON_WS_URL := ws://localhost:$(PORT)/ws/beacons
 
 # No fine-tuned drone.pt yet (needs a labeled dataset, see docs/TRAINING.md):
 # fall back to the pretrained stand-in so the live YOLO demo still runs.
+# Stand-in conf is 0.15, not 0.35: COCO scores real drones weakly (0.15-0.20 on
+# our test images), so 0.35 silently misses them. Raise per run with CONF=...
+# once drone.pt exists (then this whole block no longer applies).
 ifeq ($(wildcard detector/models/drone.pt),)
 export YOLO_WEIGHTS := yolo26n.pt
 export YOLO_TARGET_CLASSES := airplane
-export YOLO_CONF := 0.35
+export YOLO_CONF := 0.15
 endif
 
 # Resolve which source the yolo targets run on (SOURCE > VIDEO > IMAGE > folder).
@@ -113,6 +116,17 @@ endif
 #   make yolo CONF=0.2 IMGSZ=480 MAXFPS=15   # faster, more boxes
 #   make yolo CONF=0.4 IMGSZ=960             # slower, better small drones
 #   make yolo STRIDE=2 MINFRAMES=5           # fewer inferences, stricter tracks
+# MAXFPS throttles live streams (webcam) only; video/image files always run
+# full speed (file pacing was removed: an 11 s clip must not take 30 s+).
+# Explicit identity for testing the identified path on your own media
+# (beacons only correlate with scenario timelines, not arbitrary files):
+#   make yolo-pick IDENT=SEED000158Q100000
+IDENT ?=
+ifneq ($(strip $(IDENT)),)
+IDENT_FLAG := --identifier-serial $(IDENT)
+else
+IDENT_FLAG :=
+endif
 CONF ?=
 IMGSZ ?=
 MAXFPS ?= 10
@@ -161,7 +175,7 @@ help: ## Show this list.
 	@echo   make evaluate        FP-min probe on videos folder
 	@echo   make test            go test + pytest
 	@echo   make check           verify every prerequisite (run this first)
-	@echo Options: PORT=8080 SCENARIO=scenarios/demo1.json VIDEO=clip.mp4 IMAGE=shot.png SOURCE=videos/test1.mp4 PICK=1 CONF=0.2 IMGSZ=480 MAXFPS=15 STRIDE=2 MINFRAMES=5
+	@echo Options: PORT=8080 SCENARIO=scenarios/demo1.json VIDEO=clip.mp4 IMAGE=shot.png SOURCE=videos/test1.mp4 PICK=1 CONF=0.2 IMGSZ=480 MAXFPS=15 STRIDE=2 MINFRAMES=5 IDENT=serial
 
 check: ## Verify every prerequisite (run this first).
 	$(PYTHON) scripts/check_env.py
@@ -188,16 +202,16 @@ fake: ## Scripted detections from the scenario (no YOLO needed).
 	$(UV) run tools/fake_detector.py --scenario $(SCENARIO)
 
 yolo: ## Real YOLO detector on videos\ (summary per track at end).
-	cd detector && $(DETECTOR_PY) -m detector.main --source "$(YOLO_SRC)" --clock video --display --max-fps $(MAXFPS) $(PICK_FLAG) $(PERF_FLAGS)
+	cd detector && $(DETECTOR_PY) -m detector.main --source "$(YOLO_SRC)" --clock video --display --max-fps $(MAXFPS) $(PICK_FLAG) $(PERF_FLAGS) $(IDENT_FLAG)
 
 yolo-images: ## Real YOLO detector on images\ (one pass, then exits).
-	cd detector && $(DETECTOR_PY) -m detector.main --source "$(YOLO_IMG_SRC)" --clock video $(PICK_FLAG) $(PERF_FLAGS)
+	cd detector && $(DETECTOR_PY) -m detector.main --source "$(YOLO_IMG_SRC)" --clock video $(PICK_FLAG) $(PERF_FLAGS) $(IDENT_FLAG)
 
 yolo-pick: ## Interactive picker: choose which video/image to run.
-	cd detector && $(DETECTOR_PY) -m detector.main --source "$(YOLO_PICK_SRC)" --clock video --display --max-fps $(MAXFPS) --pick $(PERF_FLAGS)
+	cd detector && $(DETECTOR_PY) -m detector.main --source "$(YOLO_PICK_SRC)" --clock video --display --max-fps $(MAXFPS) --pick $(PERF_FLAGS) $(IDENT_FLAG)
 
 yolo-pick-images: ## Interactive picker over images folder only.
-	cd detector && $(DETECTOR_PY) -m detector.main --source "$(YOLO_IMG_SRC)" --clock video --pick $(PERF_FLAGS)
+	cd detector && $(DETECTOR_PY) -m detector.main --source "$(YOLO_IMG_SRC)" --clock video --pick $(PERF_FLAGS) $(IDENT_FLAG)
 
 yolo-list: ## List video sources without running YOLO.
 	cd detector && $(DETECTOR_PY) -m detector.main --source "$(YOLO_SRC)" --list-sources
@@ -208,8 +222,13 @@ yolo-list-images: ## List image sources without running YOLO.
 webcam: ## Live YOLO on webcam 0 (leave running, q quits the window).
 	cd detector && $(DETECTOR_PY) -m detector.main --source 0 --clock wall --display --max-fps $(MAXFPS) $(PERF_FLAGS)
 
+# Probe weights/classes mirror the YOLO_* fallback above: COCO weights know no
+# 'drone' class, so scoring 'drone' on yolo26n.pt is a silent zero.
+EVAL_WEIGHTS := $(if $(wildcard detector/models/drone.pt),detector/models/drone.pt,yolo26n.pt)
+EVAL_CLASSES := $(if $(wildcard detector/models/drone.pt),drone,airplane)
+
 evaluate: ## FP/min probe on videos\.
-	cd detector && $(DETECTOR_PY) tools/evaluate.py --source $(VIDEOS) --weights yolo26n.pt --target-classes drone
+	cd detector && $(DETECTOR_PY) tools/evaluate.py --source $(VIDEOS) --weights $(EVAL_WEIGHTS) --target-classes $(EVAL_CLASSES)
 
 test: ## Backend + detector tests.
 	cd server && go test ./...

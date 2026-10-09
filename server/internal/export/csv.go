@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -36,8 +37,10 @@ func (e *CSVExporter) Append(ctx context.Context, rows [][]any) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	path := filepath.Join(e.Dir, "detections-"+e.Now().Format("2006-01-02")+".csv")
-	_, statErr := os.Stat(path)
+	path, writeHeader, err := e.dailyPath()
+	if err != nil {
+		return err
+	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("csv open %q: %w", path, err)
@@ -46,7 +49,7 @@ func (e *CSVExporter) Append(ctx context.Context, rows [][]any) error {
 		_ = f.Close()
 	}()
 	w := csv.NewWriter(f)
-	if errors.Is(statErr, os.ErrNotExist) {
+	if writeHeader {
 		if err := w.Write(Columns); err != nil {
 			return fmt.Errorf("csv header %q: %w", path, err)
 		}
@@ -65,6 +68,54 @@ func (e *CSVExporter) Append(ctx context.Context, rows [][]any) error {
 		return fmt.Errorf("csv flush %q: %w", path, err)
 	}
 	return nil
+}
+
+// dailyPath keeps old-schema exports intact and starts a versioned file when
+// the column contract changes, instead of mixing row widths in one CSV.
+func (e *CSVExporter) dailyPath() (string, bool, error) {
+	base := "detections-" + e.Now().Format("2006-01-02")
+	for version := 1; ; version++ {
+		name := base + ".csv"
+		if version > 1 {
+			name = fmt.Sprintf("%s-v%d.csv", base, version)
+		}
+		path := filepath.Join(e.Dir, name)
+		header, exists, err := readCSVHeader(path)
+		if err != nil {
+			return "", false, fmt.Errorf("csv header %q: %w", path, err)
+		}
+		if !exists || len(header) == 0 || equalHeader(header, Columns) {
+			return path, !exists || len(header) == 0, nil
+		}
+	}
+}
+
+func readCSVHeader(path string) ([]string, bool, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = f.Close() }()
+	header, err := csv.NewReader(f).Read()
+	if errors.Is(err, io.EOF) {
+		return nil, true, nil
+	}
+	return header, true, err
+}
+
+func equalHeader(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // cell stringifies for CSV; times are RFC3339 UTC.

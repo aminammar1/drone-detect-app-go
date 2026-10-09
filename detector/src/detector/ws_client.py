@@ -16,22 +16,28 @@ logger = logging.getLogger(__name__)
 class DetectorClient:
     """Async sender with a bounded in-memory queue."""
 
-    def __init__(self, url: str, queue_size: int = 100) -> None:
+    def __init__(self, url: str, queue_size: int = 100, token: str = "") -> None:
         self._url = url
         self._queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue(maxsize=queue_size)
         self._pending: dict[str, str] = {}
         self._run_task: asyncio.Task[None] | None = None
         self._stopping = False
+        # Shared secret for the server's X-Detector-Token check; empty sends
+        # no header (server check disabled).
+        self._token = token
         # Last server reply per event_id (ack or error); drives snapshot pruning.
         self.acks: dict[str, dict] = {}
 
     async def run(self) -> None:
         """Hold the connection until close. Never raises."""
         backoff = 1.0
+        headers = {"X-Detector-Token": self._token} if self._token else None
         while not self._stopping:
             try:
                 logger.info("connecting to %s", self._url)
-                async with websockets.connect(self._url, ping_interval=20) as ws:
+                async with websockets.connect(
+                    self._url, ping_interval=20, additional_headers=headers
+                ) as ws:
                     logger.info("connected to %s", self._url)
                     backoff = 1.0
                     sender = asyncio.create_task(self._send_loop(ws))
@@ -56,7 +62,13 @@ class DetectorClient:
                 self._requeue_pending()
                 if self._stopping:
                     break
-                logger.warning("connection lost (%s); retrying in %.0fs", exc, backoff)
+                hint = (
+                    " -- HTTP 403 means the server's DETECTOR_TOKEN check rejected us; "
+                    "set DETECTOR_TOKEN to match the server (empty disables the check)"
+                    if "403" in str(exc)
+                    else ""
+                )
+                logger.warning("connection lost (%s); retrying in %.0fs%s", exc, backoff, hint)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30.0)
         logger.info("client stopped")
@@ -123,11 +135,20 @@ class DetectorClient:
             if kind == "ack":
                 self._pending.pop(event_id, None)
                 self.acks[event_id] = msg
+                drone = msg.get("drone") or {}
+                # Identified names come from IDENT/beacon -> DB, never pixels.
+                drone_txt = (
+                    f"{drone.get('manufacturer', '')} {drone.get('model', '')} "
+                    f"{drone.get('serial_number', '')}".strip()
+                    if drone
+                    else "unidentified"
+                )
                 logger.info(
-                    "ack event_id=%s decision=%s reason=%s",
+                    "ack event_id=%s decision=%s reason=%s drone=%s",
                     event_id,
                     msg.get("decision"),
                     msg.get("reason"),
+                    drone_txt,
                 )
             elif kind == "error":
                 self._pending.pop(event_id, None)

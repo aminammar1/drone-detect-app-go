@@ -13,6 +13,7 @@ import asyncio
 import itertools
 import logging
 import math
+import re
 import typing
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -25,6 +26,7 @@ import typer
 from detector.attributes import ModelFamilyClassifier, crop_box
 from detector.config import get_settings
 from detector.detect import (
+    Detection,
     Detector,
     TrackedDetection,
     airframe_from_class,
@@ -49,6 +51,7 @@ app = typer.Typer(help="Drone Detect App — YOLO detector (images + video).")
 
 #: Far above ByteTrack range; never collides with real ids.
 FALLBACK_TRACK_ID_START = 10**9
+PREVIEW_WINDOW_NAME = "drone-detect (q/esc or close window to stop)"
 
 
 def _parse_scenario_start(raw: str) -> datetime:
@@ -85,32 +88,26 @@ class _RunContext:
         self.client = client
         self.session_date = session_date
         self.sent = 0
-        # event_id -> absolute snapshot path; pruned when the server says
-        # the track is not an identified drone.
+        # event_id -> absolute snapshot path; generic unidentified snapshots
+        # are pruned unless a visual family prediction makes them reviewable.
         self.emitted: dict[str, Path] = {}
+        # event_id -> track_id, so late acks can name the on-screen box.
+        self.event_tracks: dict[str, int] = {}
+        self.visual_events: set[str] = set()
+        # track_id -> "Maker Model" from an identified ack; drives box labels.
+        self.track_names: dict[int, str] = {}
+        # track_id -> family prediction; remains visibly marked as a prediction.
+        self.visual_names: dict[int, tuple[str, float]] = {}
+        self._seen_acks: set[str] = set()
+        self.stop_requested = False
 
-    async def emit(
-        self,
-        *,
-        class_name: str,
-        confidence: float,
-        bbox: tuple[float, float, float, float],
-        track_id: int,
-        frame: np.ndarray,
-        detected_at: datetime,
-        source_kind: typing.Literal["image", "video"],
-        uri: str,
-        frame_index: int,
-        model_family: str | None = None,
-        model_confidence: float | None = None,
-    ) -> str | None:
-        """Snapshot, build the event, queue it. Generic classes omit visual; family needs an airframe."""
-        event_id = uuid4()
+    def save_snapshot(self, frame: np.ndarray, name: str) -> tuple[str, Path] | None:
+        """Write one annotated frame; returns (event path, absolute path)."""
         # Folder is the wall-clock session date (findable today); the event
         # time stays in detected_at, the DB row, and the sheet.
         day_dir = self.snapshot_base / self.session_date.isoformat()
         day_dir.mkdir(parents=True, exist_ok=True)
-        snapshot_file = day_dir / f"{event_id}.jpg"
+        snapshot_file = day_dir / f"{name}.jpg"
         if not cv2.imwrite(str(snapshot_file), frame):
             logger.warning("could not write snapshot %s", snapshot_file)
             return None
@@ -120,12 +117,44 @@ class _RunContext:
             )
         except ValueError:
             relative_snapshot = snapshot_file.resolve().as_posix()
+        return relative_snapshot, snapshot_file
+
+    async def emit(
+        self,
+        *,
+        class_name: str,
+        confidence: float,
+        bbox: tuple[float, float, float, float],
+        track_id: int,
+        frame: np.ndarray | None = None,
+        snapshot: tuple[str, Path] | None = None,
+        detected_at: datetime,
+        source_kind: typing.Literal["image", "video"],
+        uri: str,
+        frame_index: int,
+        model_family: str | None = None,
+        model_confidence: float | None = None,
+    ) -> str | None:
+        """Snapshot, build the event, queue it. Generic classes omit visual; family needs an airframe.
+
+        Pass `snapshot` (from save_snapshot) to share one file across several
+        events; otherwise a per-event file is written from `frame`.
+        """
+        event_id = uuid4()
+        if snapshot is None:
+            if frame is None:
+                logger.warning("no frame or snapshot for event; skipping")
+                return None
+            snapshot = self.save_snapshot(frame, str(event_id))
+            if snapshot is None:
+                return None
+        relative_snapshot, snapshot_file = snapshot
         airframe = airframe_from_class(class_name)
         visual: Visual | None = None
-        if airframe is not None:
+        if airframe is not None or model_family is not None:
             visual = Visual(
                 airframe_type=airframe,
-                airframe_confidence=confidence,
+                airframe_confidence=confidence if airframe is not None else None,
                 model_family=model_family,
                 model_confidence=model_confidence,
             )
@@ -146,40 +175,127 @@ class _RunContext:
         await self.client.submit(str(event_id), event.to_json())
         self.sent += 1
         self.emitted[str(event_id)] = snapshot_file
+        self.event_tracks[str(event_id)] = track_id
+        if model_family is not None and model_confidence is not None:
+            self.visual_events.add(str(event_id))
         logger.info(
-            "queued event_id=%s uri=%s track=%d class=%s conf=%.2f",
+            "queued event_id=%s uri=%s track=%d class=%s conf=%.2f visual_family=%s visual_conf=%s",
             event_id,
             uri,
             track_id,
             class_name,
             confidence,
+            model_family or "unknown",
+            f"{model_confidence:.2f}" if model_confidence is not None else "unknown",
         )
         return str(event_id)
 
     def prune_unidentified(self, acks: dict[str, dict]) -> tuple[int, int]:
-        """Delete snapshots the server did not confirm as identified.
+        """Prune unreviewable unidentified snapshots after server acks.
 
+        Judged per snapshot file, not per event: several events from one
+        image share a file. It survives when any event is identified or carries
+        a visual family prediction worth keeping for review.
         Missing acks (timeout/offline) are kept: never delete data the
-        server never judged. Returns (kept, pruned).
+        server never judged. Returns (kept, pruned) event counts.
         """
+        by_path: dict[Path, list[str]] = {}
+        for event_id, path in self.emitted.items():
+            by_path.setdefault(path, []).append(event_id)
         kept = 0
         pruned = 0
-        for event_id, path in self.emitted.items():
-            msg = acks.get(event_id)
-            if msg is None:
-                kept += 1
+        for path, event_ids in by_path.items():
+            msgs = [acks.get(event_id) for event_id in event_ids]
+            if all(msg is None for msg in msgs):
+                kept += len(event_ids)
                 continue
-            if msg.get("type") == "error":
-                self._delete_snapshot(event_id, path)
-                pruned += 1
-                continue
-            identity = msg.get("identity") or {}
-            if identity.get("result") == "identified":
-                kept += 1
+            identified = any(
+                msg is not None
+                and msg.get("type") != "error"
+                and (msg.get("identity") or {}).get("result") == "identified"
+                for msg in msgs
+            )
+            has_visual_prediction = any(event_id in self.visual_events for event_id in event_ids)
+            if identified or has_visual_prediction:
+                kept += len(event_ids)
             else:
-                self._delete_snapshot(event_id, path)
-                pruned += 1
+                self._delete_snapshot(event_ids[0], path)
+                pruned += len(event_ids)
         return kept, pruned
+
+    def refresh_names(self, acks: dict[str, dict]) -> int:
+        """Fold newly arrived identified acks into track_id -> model names.
+
+        Only unseen acks are scanned, so calling this every displayed frame
+        stays cheap on long streams. Returns newly named tracks.
+        """
+        named = 0
+        for event_id, msg in acks.items():
+            if event_id in self._seen_acks:
+                continue
+            self._seen_acks.add(event_id)
+            if msg.get("type") != "ack" or not msg.get("drone"):
+                continue
+            track_id = self.event_tracks.get(event_id)
+            if track_id is None:
+                continue
+            drone = msg["drone"]
+            name = f"{drone.get('manufacturer', '')} {drone.get('model', '')}".strip()
+            if name and self.track_names.get(track_id) != name:
+                self.track_names[track_id] = name
+                named += 1
+                logger.info("track=%d identified as %s", track_id, name)
+        return named
+
+    def stamp_identified(self, acks: dict[str, dict]) -> int:
+        """Stamp the model name + decision onto kept snapshots.
+
+        File/image runs send their events at the end, so acks arrive after
+        the preview is gone; the snapshot file is where the name lands.
+        One stamp per file (shared snapshots), first identified ack wins.
+        Returns stamped files.
+        """
+        by_path: dict[Path, list[str]] = {}
+        for event_id, path in self.emitted.items():
+            by_path.setdefault(path, []).append(event_id)
+        stamped = 0
+        for path, event_ids in by_path.items():
+            if not path.is_file():
+                continue
+            best: dict | None = None
+            for event_id in event_ids:
+                msg = acks.get(event_id)
+                if msg and msg.get("type") == "ack" and msg.get("drone"):
+                    best = msg
+                    break
+            if best is None:
+                continue
+            frame = cv2.imread(str(path))
+            if frame is None:
+                continue
+            drone = best["drone"]
+            line = (
+                f"{drone.get('manufacturer', '')} {drone.get('model', '')} "
+                f"{drone.get('serial_number', '')} | {best.get('decision', '')}"
+            ).strip()
+            cv2.rectangle(
+                frame, (0, 0), (min(len(line) * 12 + 16, frame.shape[1]), 34), (0, 0, 0), -1
+            )
+            cv2.putText(
+                frame,
+                line,
+                (8, 24),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
+            if cv2.imwrite(str(path), frame):
+                stamped += 1
+        if stamped:
+            logger.info("stamped %d snapshot(s) with identified model names", stamped)
+        return stamped
 
     @staticmethod
     def _delete_snapshot(event_id: str, path: Path) -> None:
@@ -191,6 +307,12 @@ class _RunContext:
         logger.info("pruned non-identified snapshot event_id=%s", event_id)
 
 
+def _snapshot_stem(path: Path) -> str:
+    """Filesystem-safe snapshot base name derived from an image file."""
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem)[:64].strip("._") or "image"
+    return f"{stem}-{uuid4().hex[:8]}"
+
+
 async def _process_image(
     ctx: _RunContext,
     detector: Detector,
@@ -199,7 +321,11 @@ async def _process_image(
     image_track_ids: itertools.count[int],
     family: ModelFamilyClassifier | None = None,
 ) -> int:
-    """Stills have no tracking: every detection is its own event."""
+    """Stills have no tracking: every detection is its own event.
+
+    One snapshot per image (all boxes annotated), shared by the image's
+    events; pruning keeps it when a visual prediction is available.
+    """
     assert item.path is not None
     loop = asyncio.get_running_loop()
     frame = await loop.run_in_executor(None, cv2.imread, str(item.path))
@@ -210,15 +336,34 @@ async def _process_image(
     if not detections:
         logger.info("no target in %s", item.uri)
         return 0
-    annotated = annotate(frame, detections)
+    classified: list[tuple[Detection, int, str | None, float | None]] = []
     for det in detections:
-        model_family, model_conf = await _classify(loop, family, annotated, det.bbox)
+        track_id = next(image_track_ids)
+        model_family, model_conf = await _classify(loop, family, frame, det.bbox)
+        classified.append((det, track_id, model_family, model_conf))
+        if model_family is not None and model_conf is not None:
+            ctx.visual_names[track_id] = (model_family, model_conf)
+    display_detections = [
+        TrackedDetection(
+            class_name=det.class_name,
+            confidence=det.confidence,
+            bbox=det.bbox,
+            track_id=track_id,
+        )
+        for det, track_id, _, _ in classified
+    ]
+    annotated = annotate(frame, display_detections, visual_labels=ctx.visual_names or None)
+    snapshot = ctx.save_snapshot(annotated, _snapshot_stem(item.path))
+    if snapshot is None:
+        logger.warning("skipping %s: snapshot write failed", item.uri)
+        return 0
+    for det, track_id, model_family, model_conf in classified:
         await ctx.emit(
             class_name=det.class_name,
             confidence=det.confidence,
             bbox=det.bbox,
-            track_id=next(image_track_ids),
-            frame=annotated,
+            track_id=track_id,
+            snapshot=snapshot,
             detected_at=detected_at,
             source_kind="image",
             uri=item.uri,
@@ -250,6 +395,27 @@ def _open_capture(ref: str | int) -> cv2.VideoCapture:
     if not cap.isOpened():
         raise SourceError(f"could not open video source: {ref!r}.")
     return cap
+
+
+def _close_windows() -> None:
+    """Tear down OpenCV windows; highgui errors must never fail a run."""
+    try:
+        cv2.destroyAllWindows()
+    except Exception as exc:  # noqa: BLE001 -- teardown only
+        logger.debug("destroyAllWindows failed: %s", exc)
+
+
+def _preview_stop_requested(window_name: str = PREVIEW_WINDOW_NAME) -> bool:
+    """Honor keyboard and title-bar close requests while a preview is running."""
+    key = cv2.waitKey(1) & 0xFF
+    if key in (ord("q"), 27):
+        return True
+    try:
+        return cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1
+    except cv2.error, AttributeError:
+        # Some OpenCV backends cannot report window visibility. Keyboard
+        # cancellation still works there.
+        return False
 
 
 async def _process_video(
@@ -339,12 +505,23 @@ async def _process_video(
                         fresh.append((det, next(fallback_track_ids)))
                     elif dedupe.should_emit(det.track_id, detected_at):
                         fresh.append((det, det.track_id))
-                # Annotate only when someone looks at it or it ships.
-                annotated: np.ndarray | None = None
-                if tracked and (display or fresh):
-                    annotated = annotate(frame, tracked)
+                visual_by_track: dict[int, tuple[str, float]] = {}
                 for det, track_id in fresh:
                     model_family, model_conf = await _classify(loop, family, frame, det.bbox)
+                    if model_family is not None and model_conf is not None:
+                        ctx.visual_names[track_id] = (model_family, model_conf)
+                        visual_by_track[track_id] = (model_family, model_conf)
+                annotated: np.ndarray | None = None
+                if tracked and (display or fresh):
+                    ctx.refresh_names(ctx.client.acks)
+                    annotated = annotate(
+                        frame,
+                        tracked,
+                        labels=ctx.track_names or None,
+                        visual_labels=ctx.visual_names or None,
+                    )
+                for det, track_id in fresh:
+                    model_family, model_conf = visual_by_track.get(track_id, (None, None))
                     assert annotated is not None
                     await ctx.emit(
                         class_name=det.class_name,
@@ -375,15 +552,29 @@ async def _process_video(
                         frame_index=frame_index,
                         detected_at=detected_at,
                     )
-                annotated = annotate(frame, tracked) if display and tracked else None
+                    if display and family is not None and tid not in ctx.visual_names:
+                        model_family, model_conf = await _classify(loop, family, frame, det.bbox)
+                        if model_family is not None and model_conf is not None:
+                            ctx.visual_names[tid] = (model_family, model_conf)
+                if display and tracked:
+                    ctx.refresh_names(ctx.client.acks)
+                    annotated = annotate(
+                        frame,
+                        tracked,
+                        labels=ctx.track_names or None,
+                        visual_labels=ctx.visual_names or None,
+                    )
+                else:
+                    annotated = None
             if display:
-                cv2.imshow(
-                    "drone-detect (q to quit)", annotated if annotated is not None else frame
-                )
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    logger.info("quit requested; stopping at frame %d", frame_index)
+                cv2.imshow(PREVIEW_WINDOW_NAME, annotated if annotated is not None else frame)
+                if _preview_stop_requested():
+                    ctx.stop_requested = True
+                    logger.info("preview closed; stopping at frame %d", frame_index)
                     break
-            if frame_interval > 0:
+            # Throttle live streams only; files run full speed (an 11 s clip
+            # must not take 30 s+ because of preview pacing).
+            if live and frame_interval > 0:
                 wait = frame_interval - (loop.time() - last_pace)
                 if wait > 0:
                     await asyncio.sleep(wait)
@@ -427,13 +618,22 @@ async def _emit_summaries(
     sent = 0
     for summary in ready:
         model_family, model_conf = await _classify(loop, family, summary.frame, summary.bbox)
+        if model_family is None or model_conf is None:
+            model_family, model_conf = ctx.visual_names.get(summary.track_id, (None, None))
         best = TrackedDetection(
             class_name=summary.class_name,
             confidence=summary.confidence,
             bbox=summary.bbox,
             track_id=summary.track_id,
         )
-        annotated_best = annotate(summary.frame, [best])
+        visual_labels = (
+            {summary.track_id: (model_family, model_conf)}
+            if model_family is not None and model_conf is not None
+            else None
+        )
+        annotated_best = annotate(summary.frame, [best], visual_labels=visual_labels)
+        if model_family is not None and model_conf is not None:
+            ctx.visual_names[summary.track_id] = (model_family, model_conf)
         event_id = await ctx.emit(
             class_name=summary.class_name,
             confidence=summary.confidence,
@@ -540,7 +740,17 @@ async def _run(
     eff_stride = stride if stride is not None else settings.yolo_stride
     eff_min_frames = min_frames if min_frames is not None else settings.track_min_frames
     session_date = datetime.now(UTC).date()
-    client = DetectorClient(settings.ws_url, settings.ws_queue_size)
+    logger.info(
+        "run settings: conf=%.2f imgsz=%d stride=%d min_frames=%d max_fps=%.1f display=%s auth=%s",
+        eff_conf,
+        eff_imgsz,
+        eff_stride,
+        eff_min_frames,
+        max_fps,
+        display,
+        "token" if settings.detector_token else "off",
+    )
+    client = DetectorClient(settings.ws_url, settings.ws_queue_size, token=settings.detector_token)
     run_task = client.attach()
     ctx = _RunContext(
         source_id=settings.source_id,
@@ -580,6 +790,8 @@ async def _run(
                         family=family,
                     )
                     total_frames += frames
+                    if ctx.stop_requested:
+                        break
             except SourceError as exc:
                 skipped += 1
                 logger.warning("skipping %s: %s", item.uri, exc)
@@ -588,8 +800,20 @@ async def _run(
                 skipped += 1
                 logger.warning("skipping %s after error: %s", item.uri, exc)
                 continue
+        # Windows are done once every file is read: close them before the
+        # ack wait, so a slow/blocked server never leaves a "not responding"
+        # preview window behind.
+        if display:
+            _close_windows()
+        if ctx.sent:
+            logger.info(
+                "waiting for %d server ack(s) (%d event(s) sent)...",
+                ctx.sent - len(client.acks),
+                ctx.sent,
+            )
         drained = await client.drain()
         kept, pruned = ctx.prune_unidentified(client.acks)
+        stamped = ctx.stamp_identified(client.acks)
         if not drained:
             await client.close()
             await asyncio.gather(run_task, return_exceptions=True)
@@ -598,12 +822,13 @@ async def _run(
         await client.close()
         await asyncio.gather(run_task, return_exceptions=True)
         if display:
-            cv2.destroyAllWindows()
+            _close_windows()
     typer.echo(
         f"done: sent {ctx.sent} detection event(s) from "
         f"{len(media) - skipped} source(s) ({skipped} skipped), "
         f"{total_frames} video frame(s) read; "
-        f"snapshots kept={kept} pruned={pruned} (non-identified)"
+        f"snapshots kept={kept} pruned={pruned} (non-identified) "
+        f"stamped={stamped} (identified model names)"
     )
 
 

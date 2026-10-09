@@ -97,9 +97,11 @@ func (r *Correlator) waitForLateBeacon(ctx context.Context, det *model.Detection
 	}
 }
 
-// usableVisual gates the cross-check per DESCRIPTION.md section 4 rule 3.
+// usableVisual accepts either confident visual attribute per DESCRIPTION.md section 4.
 func usableVisual(v *model.Visual, minConf float64) bool {
-	return v != nil && v.AirframeType != "" && v.AirframeConfidence >= minConf
+	return v != nil &&
+		((v.AirframeType != "" && v.AirframeConfidence >= minConf) ||
+			(v.ModelFamily != "" && v.ModelConfidence >= minConf))
 }
 
 // crossCheck filters by visual; unregistered serials survive for the decision step.
@@ -161,13 +163,13 @@ func (r *Correlator) fromCandidates(candidates []model.Beacon, drones []*model.D
 	}
 }
 
-// compatible exact-matches airframe; family is case-insensitive when confident.
+// compatible checks every available confident attribute; family matching ignores case.
 func compatible(v *model.Visual, drone *model.Drone, minConf float64) bool {
-	if v.AirframeType != drone.AirframeType {
+	if v.AirframeType != "" && v.AirframeConfidence >= minConf && v.AirframeType != drone.AirframeType {
 		return false
 	}
-	if v.ModelFamily == "" || drone.ModelFamily == "" || v.ModelConfidence < minConf {
-		return true
+	if v.ModelFamily != "" && drone.ModelFamily != "" && v.ModelConfidence >= minConf {
+		return strings.EqualFold(v.ModelFamily, drone.ModelFamily)
 	}
-	return strings.EqualFold(v.ModelFamily, drone.ModelFamily)
+	return true
 }

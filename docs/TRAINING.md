@@ -3,7 +3,30 @@
 Fine-tune the latest Ultralytics YOLO model (YOLO26) for drones on Windows,
 with and without an NVIDIA GPU. Result lands in `detector/models/`.
 
-> Versions seen here: Ultralytics 8.4.173, Torch 2.14.1, `yolo26n.pt` base.
+## 0. Current weights — no training needed (verified 2026-10-09)
+
+`detector/models/drone.pt` is **not** locally trained. It is a copy of
+`yolo11n_drone.pt` from `marie-kjelberg/drone-detector` on Hugging Face Hub
+(YOLO11n nano, single class `drone`, ~5 MB, AGPL-3.0 like Ultralytics itself):
+
+```powershell
+cd detector
+$p = .\.venv\Scripts\python.exe -c "from huggingface_hub import hf_hub_download; print(hf_hub_download(repo_id='marie-kjelberg/drone-detector', filename='yolo11n_drone.pt'))"
+Copy-Item $p.Trim() models\drone.pt
+```
+
+Why this one: no public YOLO26 drone weights exist yet, and YOLO11 `.pt`
+loads fine under Ultralytics 8.4.174. Two candidates were tried on our own
+`images/` at conf 0.35 — `QuincySorrentino/AeroYOLO` (`best.pt`, 3 classes)
+saw **nothing** even at 0.05, while `yolo11n_drone.pt` gives `drone 0.87` on
+`image.png` and six `drone` boxes (0.87–0.92) on
+`hexacopter-drones-flying.webp`. End to end (`make yolo-images
+IDENT=SEED000158Q100000`): 7 events, `class=drone`, all acked `authorized`
+as `DJI Mavic 3`. No published precision/recall is known for these weights;
+the local fine-tune path below (M8) stays the route to measured metrics.
+Re-check the Hub for YOLO26 drone weights before spending GPU time.
+
+> Versions seen here: Ultralytics 8.4.174, Torch 2.14.1, `yolo26n.pt` base.
 > If `uv lock --upgrade` moves these, re-check the Ultralytics docs — the
 > CLI below (`YOLO(...).train(...)`) is stable across YOLO26 patches.
 
@@ -62,11 +85,36 @@ Rules:
 - Keep a short **drone-free video** in `videos/` — it is the false-positive
   probe for `tools/evaluate.py` (FP/min must drop after fine-tuning).
 
-Stage C crops (only if you enable the family classifier): export one image
-per emitted box (`data/snapshots/` already has them), sort into folders
-`datasets/family/Mavic/`, `.../Mini/`, `.../Anafi/`, ... — 200+ crops per
-family minimum, mixed distances and lighting. YOLO-cls trains from folders,
-no YAML needed.
+Stage C (family classifier prototype): the public
+[`cranfield-synthetic-drone-classification`](https://huggingface.co/datasets/mazqtpopx/cranfield-synthetic-drone-classification)
+dataset is CC BY 4.0 and has synthetic DJI Mavic, Phantom, Inspire, and No
+Drone classes. It demonstrates family-level recognition; it cannot recognize
+exact SKUs such as Mavic 3. The synthetic-to-real gap means you must validate
+on held-out real camera crops before presenting accuracy claims.
+
+```powershell
+New-Item -ItemType Directory -Force data\training | Out-Null
+curl.exe --location --fail --output data\training\cranfield-synthetic-drone-classification.zip `
+  'https://huggingface.co/datasets/mazqtpopx/cranfield-synthetic-drone-classification/resolve/main/cranfield-synthetic-drone-classification.zip?download=true'
+Expand-Archive -Path data\training\cranfield-synthetic-drone-classification.zip `
+  -DestinationPath data\training\cranfield-synthetic-drone-classification -Force
+cd detector
+uv run tools\train_family_classifier.py --epochs 8 --fraction 0.15
+$env:ATTR_FAMILY_ENABLED = "true"
+$env:ATTR_FAMILY_CONF = "0.75"
+uv run python -m detector.main --source ..\images --clock video
+uv run tools\render_family_showcase.py --source ..\images --output-dir ..\screenshots
+```
+
+The quick command uses a deterministic 15% subset of the stratified training
+split and the complete validation split. Set `--fraction 1.0` for full training;
+on CPU this takes substantially longer.
+
+For a real product-family classifier, replace the synthetic images with
+properly licensed real images grouped by family, use separate train/validation
+sources, and retain attribution. At least 200 varied crops per family is a
+starting point, not a performance guarantee. Do not label a family prediction
+as a registered exact model.
 
 ## 2. Train (Windows PowerShell)
 

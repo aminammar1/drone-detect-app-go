@@ -24,7 +24,7 @@ A local system (Windows development machine) that:
 - Lock files (`go.sum`, `uv.lock`) give reproducibility; this table is a **dated snapshot**, not a pin.
 - If a dependency has no release compatible with the latest stable Python/Go yet, use the newest version that works and note it in the PR/commit message.
 
-**Snapshot verified on 2026-10-06** (sources: PyPI, upstream Git tags, official MongoDB and Ultralytics docs):
+**Snapshot verified on 2026-10-06** (sources: PyPI, upstream Git tags, official MongoDB and Ultralytics docs). The Ultralytics row was refreshed from PyPI on 2026-10-09:
 
 | Area | Component | Latest stable | Notes |
 |---|---|---|---|
@@ -38,7 +38,7 @@ A local system (Windows development machine) that:
 | Go | stretchr/testify (`github.com/stretchr/testify`) | **v1.12.1** | Test assertions |
 | Python | Python | **3.14.8** | Install with `uv python install 3.14` |
 | Python | uv | **0.12.23** | |
-| Python | Ultralytics (package) | **8.4.173** | Latest model family: **YOLO26** (released Jan 2026), e.g. `yolo26n.pt`, `yolo26n-cls.pt` |
+| Python | Ultralytics (package) | **8.4.174** | Latest model family: **YOLO26** (released Jan 2026), e.g. `yolo26n.pt`, `yolo26n-cls.pt` |
 | Python | PyTorch / torchvision | **2.14.1 / 0.29.1** | CPU or CUDA build, see official PyTorch install selector |
 | Python | opencv-python | **5.0.0.93** | Use `opencv-python-headless` on servers without display |
 | Python | numpy | **2.5.3** | Frame arrays in `detector/detect.py` |
@@ -73,7 +73,7 @@ flowchart LR
         S1["1. Read frame"]
         S2["2. YOLO26 detect: drone"]
         S3["3. Track + dedupe (track_id, cooldown)"]
-        S4["4. Visual attributes: airframe_type, model_family (optional)"]
+        S4["4. Visual attributes: airframe type + predicted model family (optional)"]
         S5["5. Save snapshot + build detection event"]
         S1 --> S2 --> S3 --> S4 --> S5
     end
@@ -177,8 +177,8 @@ flowchart TD
 | 1 | Read | `detector/sources.py` | image / video / stream | frame + timestamp | Skip frame, log; stop at end of source |
 | 2 | Detect | `detector/detect.py` | frame | bounding boxes + confidence | Log and continue |
 | 3 | Track + summarize | `detector/tracking.py` | boxes | `track_id`, best frame per track | Files: one summary per confirmed track at end; streams: "emit now?" flag |
-| 4 | Visual attributes | `detector/attributes.py` | crop of the best box | `airframe_type`, `model_family` + confidences (optional) | Omit `visual` (resolver skips the cross-check) |
-| 5 | Event | `detector/events.py`, `ws_client.py` | best frame per track | `detection` JSON over WebSocket | Buffer in bounded queue, reconnect with backoff; snapshots pruned unless ack says `identified` |
+| 4 | Visual attributes | `detector/attributes.py` | crop of the best box | `airframe_type`, predicted `model_family` + confidences (optional) | Omit `visual` (resolver skips the cross-check) |
+| 5 | Event | `detector/events.py`, `ws_client.py` | best frame per track | `detection` JSON over WebSocket | Buffer in bounded queue, reconnect with backoff; preserve snapshots with a visual family prediction |
 | 6 | Beacons | `tools/remote_id_sim.py` | scenario file | `beacon` JSON over WebSocket | Reconnect; beacons are not persisted |
 | 7 | Resolve identity | `server/internal/identity` | detection + beacon buffer + DB | identity result | Unknown or ambiguous becomes `unidentified` |
 | 8 | Decide | `server/internal/authorization` | identity + zone + time | decision + reason | Any error becomes `unidentified` + logged, never a crash |
@@ -236,7 +236,7 @@ changing the server.
    - **1 candidate:** identified.
    - **More than 1:** narrow down using visual attributes (step 3). Still more than 1 → `ambiguous` → `unidentified`.
 3. **Visual attributes cross-check** (when the detector supplies `visual` with enough confidence):
-   - Compare `airframe_type` (quadcopter, hexacopter, fixed_wing, vtol, ...) and, if available, `model_family` (Mavic, Mini, Anafi, ...) with the candidate drone's DB record.
+   - Compare each available confident visual attribute independently: `airframe_type` (quadcopter, hexacopter, fixed_wing, vtol, ...) and/or `model_family` (Mavic, Mini, Anafi, ...). The classifier's family output is a broad visual prediction, never an exact product SKU.
    - **Disambiguates** several beacons (keep only the compatible ones).
    - **Detects spoofing:** a beacon claims an authorized quadcopter, but the camera sees a fixed-wing → `mismatch` → `unidentified` + alert.
 
@@ -249,7 +249,7 @@ verify or disambiguate an identity that came from elsewhere.
 |---|---|---|---|
 | A | No visual attributes; `visual` omitted | Nothing | M2–M5 |
 | B | **Multi-class YOLO26 detector**: classes = airframe types (e.g. `quadcopter`, `fixed_wing`, `multirotor_heavy`) | A dataset labeled by airframe type, or relabel one | M8 |
-| C | **Crop classifier for `model_family`**: Ultralytics **YOLO26-cls** fine-tuned on cropped boxes (same toolchain, simplest) | Cropped, labeled images per model family | M8 (optional) |
+| C | **Crop classifier for `model_family`**: Ultralytics **YOLO26-cls** fine-tuned on labeled crops; the available showcase dataset supports Mavic/Phantom/Inspire families, not exact product SKUs | Labeled images per family | M8 (optional; showcase prototype) |
 | D | Hugging Face backbone (e.g. a DINOv2-style vision model via `transformers`) with a small classification head | Only if C is not accurate enough | Later |
 
 Recommendation: **start at A**, build and test the whole pipeline with *simulated* `visual` values in
@@ -298,6 +298,9 @@ drone-detect-app/
 │   │   ├── events.py          # pydantic event models
 │   │   └── ws_client.py       # reconnecting WebSocket client
 │   ├── models/                # *.pt weights (gitignored)
+│   ├── tools/
+│   │   ├── train_family_classifier.py   # fine-tune optional visual family head
+│   │   └── render_family_showcase.py    # local image showcase; no server events
 │   └── tests/
 ├── server/                    # Go + Gin
 │   ├── go.mod

@@ -54,6 +54,8 @@ var Columns = []string{
 	"Model",
 	"Version",
 	"Family",
+	"Visual model",
+	"Visual conf",
 	"Seen",
 	"Registered",
 	"Category",
@@ -68,9 +70,13 @@ const humanTime = "2006-01-02 15:04:05"
 // Row builds a Columns-ordered row; nil drone yields empty registration cells.
 func Row(doc *model.StoredDetection, drone *model.Drone, ownerName string) []any {
 	row := make([]any, 0, len(Columns))
-	seen := ""
+	seen, visualModel, visualConf := "", "", any("")
 	if doc.Visual != nil {
 		seen = doc.Visual.AirframeType
+		visualModel = doc.Visual.ModelFamily
+		if doc.Visual.ModelFamily != "" {
+			visualConf = doc.Visual.ModelConfidence
+		}
 	}
 	serial, maker, mod, modVer, family, registered, category, year := "", "", "", "", "", "", "", ""
 	if drone != nil {
@@ -100,6 +106,8 @@ func Row(doc *model.StoredDetection, drone *model.Drone, ownerName string) []any
 		mod,
 		modVer,
 		family,
+		visualModel,
+		visualConf,
 		seen,
 		registered,
 		category,

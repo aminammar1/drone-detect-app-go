@@ -23,6 +23,10 @@ type Deps struct {
 	RetryMax      time.Duration // backoff cap
 	QueueSize     int           // export queue buffer
 	RequeuePage   int           // startup requeue page size
+	// ExportIdentifiedOnly mirrors the live enqueue gate: startup requeue
+	// skips non-identified rows so a restart cannot export what the live
+	// path would filter. MongoDB still keeps every detection.
+	ExportIdentifiedOnly bool
 }
 
 type retryItem struct {
@@ -263,8 +267,15 @@ func (w *Worker) requeue(ctx context.Context) {
 		if len(docs) == 0 {
 			return
 		}
-		w.deps.Logger.Info("export requeue", "count", len(docs))
-		w.pending = append(w.pending, docs...)
+		kept := 0
+		for _, doc := range docs {
+			if w.deps.ExportIdentifiedOnly && doc.Identity.Result != model.IdentityIdentified {
+				continue
+			}
+			w.pending = append(w.pending, doc)
+			kept++
+		}
+		w.deps.Logger.Info("export requeue", "found", len(docs), "queued", kept)
 		if len(docs) < w.deps.RequeuePage {
 			return
 		}
