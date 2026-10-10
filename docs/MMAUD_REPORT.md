@@ -80,7 +80,7 @@ explodes 0→0.354, so 0.5 was kept (unknown 3.6% val / 9.3% test).
 - `uv run python tools\mmaud_demo_video.py --bag b5` renders the M300 segment
   (136 frames @10 fps), including correct, incorrect, unknown, and missed
   examples. Output is under ignored `data/training/demo/mmaud/`.
-- The LinkedIn examples in `screenshots/` show one correct M300 result and one
+- The example images in `screenshots/` show one correct M300 result and one
   Phantom detector miss. The zoom inset is for visibility; it does not change
   the model input or the evaluation.
 - Track-vote aggregation (majority of confident crops per track, id for display
