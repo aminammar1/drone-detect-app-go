@@ -1,69 +1,25 @@
-# LinkedIn post draft — drone detection and visual family experiment
-
-Copy the text below into LinkedIn and attach both images. The images are real
-MMAUD V1 held-out test frames, processed offline by the existing detector and
-the separate experimental family classifier. Image attribution and license:
-[MMAUD attribution](MMAUD_ATTRIBUTION.md).
+# LinkedIn showcase post — Drone Detect App
 
 ## Copy-ready post
 
-I wanted my drone-detection project to do more than draw a box. I added a
-separate visual classifier and evaluated the two-stage pipeline on real,
-wide-angle drone footage from MMAUD V1.
+🚁 **Drone Detect App — from camera detection to airspace decision**
 
-The experiment covers five sequence-labeled types: Mavic 2, Mavic 3, Phantom 4,
-Avata, and M300. The official test segments were excluded from training, and I
-evaluated 584 labeled test crops. These segments come from flights also present
-in training, so this test does not prove generalization to new scenes.
+I built an end-to-end drone monitoring prototype that brings computer vision and backend decision-making together.
 
-Here is what the numbers actually say:
+It detects and tracks drones in images and video, streams events to a Go backend, checks Remote ID against registered aircraft and authorization rules, and records results in MongoDB with Sheets/CSV reporting.
 
-- Classifier-only accuracy across the five labels: **51.4%**.
-- After grouping Mavic 2 and Mavic 3 into the Mavic family: **58.7%** across
-  Mavic, Phantom, Avata, and M300.
-- On the narrower shared Mavic/Phantom subset (338 crops), the new candidate
-  scored **78.7%**, compared with **20.1%** for the previous classifier.
-- In the full detector-plus-classifier pipeline, the detector missed **78.1%**
-  of the test targets. Only **63 of 584 (10.8%)** received the correct family
-  label end to end.
+I also experimented with visual drone-family classification as the next step for making detections more informative.
 
-So the 80% real-world goal is **not met**. The strongest lesson is that small,
-distant-object detection is currently the bottleneck. A classifier cannot name
-a drone that the detector never finds, and several Avata examples were confused
-with other families.
+Built with Python, YOLO, OpenCV, Go, Gin, WebSockets, and MongoDB. Still improving it one real test at a time.
 
-The next step is to improve small-object detection and test on separate scenes,
-then rerun the full evaluation. The candidate remains separate from the
-production checkpoint; visual family predictions are experimental evidence,
-not a registered drone identity.
+Code and project details: [GitHub repository](https://github.com/aminammar1/drone-detect-app-go)
 
-This is a useful computer-vision result even without a victory metric: the
-held-out test exposed exactly where the pipeline fails and what to improve next.
+#ComputerVision #DroneDetection #Python #Golang #MachineLearning #OpenSource
 
-Dataset: MMAUD, Yuan et al., ICRA 2024. The attached frames are from its V1
-test segments and are shared with attribution under CC BY-NC-SA 4.0.
+## Screenshot to attach
 
-#ComputerVision #ObjectDetection #MachineLearning #DroneDetection #MLOps
+Attach this detector output as the post image:
 
-## Images to attach
+![YOLO detects a DJI Mavic 3 in a showcase image](../screenshots/showcase-drone-web-dji-mavic-3.jpg)
 
-### Correct M300 example
-
-One held-out test frame where YOLO detects the drone and the candidate
-classifier predicts M300. The zoom inset enlarges the same frame region; this
-single example is illustrative, not an accuracy estimate.
-
-![MMAUD held-out M300 detection and family prediction](../screenshots/mmaud-m300-heldout-hit.jpg)
-
-### Phantom 4 detector miss
-
-One held-out Phantom 4 frame where the detector misses the labeled target. The
-red inset shows the ground-truth region that the detector failed to find.
-
-![MMAUD held-out Phantom 4 detector miss](../screenshots/mmaud-phantom4-heldout-miss.jpg)
-
-## Posting note
-
-The dataset is licensed CC BY-NC-SA 4.0. Keep the attribution with these images
-and confirm the license is appropriate before using them in commercial
-promotion.
+The box is the model's drone detection. It does not predict the Mavic 3 name; visual family recognition is still being explored. The photo is by HKesteloo, CC BY-SA 4.0: https://commons.wikimedia.org/wiki/File:DJI_Mavic_3.jpg
