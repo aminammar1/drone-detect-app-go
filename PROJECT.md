@@ -249,7 +249,7 @@ verify or disambiguate an identity that came from elsewhere.
 |---|---|---|---|
 | A | No visual attributes; `visual` omitted | Nothing | M2–M5 |
 | B | **Multi-class YOLO26 detector**: classes = airframe types (e.g. `quadcopter`, `fixed_wing`, `multirotor_heavy`) | A dataset labeled by airframe type, or relabel one | M8 |
-| C | **Crop classifier for `model_family`**: Ultralytics **YOLO26-cls** fine-tuned on labeled crops; the available showcase dataset supports Mavic/Phantom/Inspire families, not exact product SKUs | Labeled images per family | M8 (optional; showcase prototype) |
+| C | **Crop classifier for `model_family`**: Ultralytics **YOLO26-cls** fine-tuned on labeled crops. Cranfield provides synthetic Mavic/Phantom/Inspire labels; MMAUD V1 provides real sequence labels for Mavic 2/3, Phantom 4, Avata, and M300. Neither supports universal or exact product identification from arbitrary views. The MMAUD candidate remains experimental because held-out results are below target. | Labeled images per family | M8 (optional; showcase prototype) |
 | D | Hugging Face backbone (e.g. a DINOv2-style vision model via `transformers`) with a small classification head | Only if C is not accurate enough | Later |
 
 Recommendation: **start at A**, build and test the whole pipeline with *simulated* `visual` values in
@@ -300,7 +300,10 @@ drone-detect-app/
 │   ├── models/                # *.pt weights (gitignored)
 │   ├── tools/
 │   │   ├── train_family_classifier.py   # fine-tune optional visual family head
-│   │   └── render_family_showcase.py    # local image showcase; no server events
+│   │   ├── render_family_showcase.py    # local image showcase; no server events
+│   │   ├── mmaud_build_crops.py         # build local labeled crops from MMAUD V1
+│   │   ├── mmaud_eval.py                # compare crop and end-to-end family metrics
+│   │   └── mmaud_demo_video.py          # render an offline held-out bag demo
 │   └── tests/
 ├── server/                    # Go + Gin
 │   ├── go.mod
@@ -320,10 +323,11 @@ drone-detect-app/
 │   ├── fake_detector.py       # sends scripted detection events
 │   └── remote_id_sim.py       # simulated Remote ID beacons from a scenario
 ├── scenarios/                 # scenario JSON files
-├── data/                      # snapshots, CSV exports (gitignored)
+├── data/                      # snapshots, CSV exports, local training data (gitignored)
+├── screenshots/               # reviewed project/showcase images
 ├── videos/                    # INPUT: my test videos (provided by me, gitignored)
 ├── images/                    # INPUT: my test images (provided by me, gitignored)
-└── docs/
+└── docs/                      # architecture, training, experiment report, and attribution
 ```
 
 ---

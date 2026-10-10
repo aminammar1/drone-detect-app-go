@@ -1,0 +1,440 @@
+{
+  "note": "REAL held-out MMAUD V1 test segment (temporal split, 30-frame margins).",
+  "threshold": 0.5,
+  "classes": [
+    "mavic2",
+    "mavic3",
+    "phantom4",
+    "avata",
+    "m300"
+  ],
+  "candidate_classifier_only": {
+    "n": 584,
+    "accuracy": 0.5137,
+    "macro_f1": 0.548,
+    "per_class": {
+      "mavic2": {
+        "precision": 0.5812,
+        "recall": 0.4474,
+        "f1": 0.5056,
+        "support": 152
+      },
+      "mavic3": {
+        "precision": 0.4813,
+        "recall": 0.939,
+        "f1": 0.6364,
+        "support": 82
+      },
+      "phantom4": {
+        "precision": 0.5865,
+        "recall": 0.75,
+        "f1": 0.6582,
+        "support": 104
+      },
+      "avata": {
+        "precision": 0.0606,
+        "recall": 0.0118,
+        "f1": 0.0197,
+        "support": 170
+      },
+      "m300": {
+        "precision": 0.8621,
+        "recall": 0.9868,
+        "f1": 0.9202,
+        "support": 76
+      }
+    },
+    "confusion": {
+      "mavic2": {
+        "mavic2": 68,
+        "mavic3": 42,
+        "phantom4": 2,
+        "avata": 6,
+        "m300": 1,
+        "Unknown": 33
+      },
+      "mavic3": {
+        "mavic2": 1,
+        "mavic3": 77,
+        "phantom4": 0,
+        "avata": 3,
+        "m300": 0,
+        "Unknown": 1
+      },
+      "phantom4": {
+        "mavic2": 0,
+        "mavic3": 0,
+        "phantom4": 78,
+        "avata": 22,
+        "m300": 0,
+        "Unknown": 4
+      },
+      "avata": {
+        "mavic2": 48,
+        "mavic3": 40,
+        "phantom4": 53,
+        "avata": 2,
+        "m300": 11,
+        "Unknown": 16
+      },
+      "m300": {
+        "mavic2": 0,
+        "mavic3": 1,
+        "phantom4": 0,
+        "avata": 0,
+        "m300": 75,
+        "Unknown": 0
+      }
+    },
+    "unknown_rate": 0.0925,
+    "kept_accuracy": 0.566
+  },
+  "candidate_family_level": {
+    "n": 584,
+    "accuracy": 0.5873,
+    "macro_f1": 0.5835,
+    "per_class": {
+      "Mavic": {
+        "precision": 0.6787,
+        "recall": 0.8034,
+        "f1": 0.7358,
+        "support": 234
+      },
+      "Phantom": {
+        "precision": 0.5865,
+        "recall": 0.75,
+        "f1": 0.6582,
+        "support": 104
+      },
+      "Avata": {
+        "precision": 0.0606,
+        "recall": 0.0118,
+        "f1": 0.0197,
+        "support": 170
+      },
+      "M300": {
+        "precision": 0.8621,
+        "recall": 0.9868,
+        "f1": 0.9202,
+        "support": 76
+      }
+    },
+    "confusion": {
+      "Mavic": {
+        "Mavic": 188,
+        "Phantom": 2,
+        "Avata": 9,
+        "M300": 1,
+        "Unknown": 34
+      },
+      "Phantom": {
+        "Mavic": 0,
+        "Phantom": 78,
+        "Avata": 22,
+        "M300": 0,
+        "Unknown": 4
+      },
+      "Avata": {
+        "Mavic": 88,
+        "Phantom": 53,
+        "Avata": 2,
+        "M300": 11,
+        "Unknown": 16
+      },
+      "M300": {
+        "Mavic": 1,
+        "Phantom": 0,
+        "Avata": 0,
+        "M300": 75,
+        "Unknown": 0
+      }
+    },
+    "unknown_rate": 0.0925,
+    "kept_accuracy": 0.6472
+  },
+  "baseline_mapped": {
+    "n": 584,
+    "accuracy": 0.1182,
+    "unknown_rate": 0.0548,
+    "note": "Not a like-for-like all-class score: Avata and M300 are unsupported by family.pt and counted as Unknown targets.",
+    "confusion_true_mmaud_vs_pred_baseline": {
+      "mavic2": {
+        "Mavic": 59,
+        "Phantom": 2,
+        "Inspire": 79,
+        "No Drone": 0,
+        "Unknown": 12
+      },
+      "mavic3": {
+        "Mavic": 1,
+        "Phantom": 25,
+        "Inspire": 48,
+        "No Drone": 0,
+        "Unknown": 8
+      },
+      "phantom4": {
+        "Mavic": 54,
+        "Phantom": 8,
+        "Inspire": 31,
+        "No Drone": 0,
+        "Unknown": 11
+      },
+      "avata": {
+        "Mavic": 2,
+        "Phantom": 41,
+        "Inspire": 126,
+        "No Drone": 0,
+        "Unknown": 1
+      },
+      "m300": {
+        "Mavic": 22,
+        "Phantom": 54,
+        "Inspire": 0,
+        "No Drone": 0,
+        "Unknown": 0
+      }
+    }
+  },
+  "shared_family_comparison": {
+    "families": [
+      "Mavic",
+      "Phantom"
+    ],
+    "n": 338,
+    "threshold": 0.5,
+    "candidate_accuracy": 0.787,
+    "baseline_accuracy": 0.2012,
+    "note": "Like-for-like family labels only; Avata and M300 are excluded because family.pt cannot represent them."
+  },
+  "end_to_end": {
+    "matched_only": {
+      "n": 128,
+      "accuracy": 0.4922,
+      "macro_f1": 0.1937,
+      "per_class": {
+        "mavic2": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0
+        },
+        "mavic3": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 2
+        },
+        "phantom4": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0
+        },
+        "avata": {
+          "precision": 0.6,
+          "recall": 0.0577,
+          "f1": 0.1053,
+          "support": 52
+        },
+        "m300": {
+          "precision": 0.9231,
+          "recall": 0.8108,
+          "f1": 0.8633,
+          "support": 74
+        }
+      },
+      "confusion": {
+        "mavic2": {
+          "mavic2": 0,
+          "mavic3": 0,
+          "phantom4": 0,
+          "avata": 0,
+          "m300": 0,
+          "Unknown": 0
+        },
+        "mavic3": {
+          "mavic2": 0,
+          "mavic3": 0,
+          "phantom4": 0,
+          "avata": 2,
+          "m300": 0,
+          "Unknown": 0
+        },
+        "phantom4": {
+          "mavic2": 0,
+          "mavic3": 0,
+          "phantom4": 0,
+          "avata": 0,
+          "m300": 0,
+          "Unknown": 0
+        },
+        "avata": {
+          "mavic2": 0,
+          "mavic3": 0,
+          "phantom4": 40,
+          "avata": 3,
+          "m300": 5,
+          "Unknown": 4
+        },
+        "m300": {
+          "mavic2": 0,
+          "mavic3": 0,
+          "phantom4": 13,
+          "avata": 0,
+          "m300": 60,
+          "Unknown": 1
+        }
+      },
+      "unknown_rate": 0.0391,
+      "kept_accuracy": 0.5122
+    },
+    "all_ground_truth": {
+      "n": 584,
+      "accuracy": 0.1079,
+      "macro_f1": 0.1771,
+      "per_class": {
+        "mavic2": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 152
+        },
+        "mavic3": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 82
+        },
+        "phantom4": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 104
+        },
+        "avata": {
+          "precision": 0.6,
+          "recall": 0.0176,
+          "f1": 0.0343,
+          "support": 170
+        },
+        "m300": {
+          "precision": 0.9231,
+          "recall": 0.7895,
+          "f1": 0.8511,
+          "support": 76
+        }
+      },
+      "confusion": {
+        "mavic2": {
+          "mavic2": 0,
+          "mavic3": 0,
+          "phantom4": 0,
+          "avata": 0,
+          "m300": 0,
+          "Unknown": 152
+        },
+        "mavic3": {
+          "mavic2": 0,
+          "mavic3": 0,
+          "phantom4": 0,
+          "avata": 2,
+          "m300": 0,
+          "Unknown": 80
+        },
+        "phantom4": {
+          "mavic2": 0,
+          "mavic3": 0,
+          "phantom4": 0,
+          "avata": 0,
+          "m300": 0,
+          "Unknown": 104
+        },
+        "avata": {
+          "mavic2": 0,
+          "mavic3": 0,
+          "phantom4": 40,
+          "avata": 3,
+          "m300": 5,
+          "Unknown": 122
+        },
+        "m300": {
+          "mavic2": 0,
+          "mavic3": 0,
+          "phantom4": 13,
+          "avata": 0,
+          "m300": 60,
+          "Unknown": 3
+        }
+      },
+      "unknown_rate": 0.7894,
+      "kept_accuracy": 0.5122
+    },
+    "family_level_all_ground_truth": {
+      "n": 584,
+      "accuracy": 0.1079,
+      "macro_f1": 0.2213,
+      "per_class": {
+        "Mavic": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 234
+        },
+        "Phantom": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 104
+        },
+        "Avata": {
+          "precision": 0.6,
+          "recall": 0.0176,
+          "f1": 0.0343,
+          "support": 170
+        },
+        "M300": {
+          "precision": 0.9231,
+          "recall": 0.7895,
+          "f1": 0.8511,
+          "support": 76
+        }
+      },
+      "confusion": {
+        "Mavic": {
+          "Mavic": 0,
+          "Phantom": 0,
+          "Avata": 2,
+          "M300": 0,
+          "Unknown": 232
+        },
+        "Phantom": {
+          "Mavic": 0,
+          "Phantom": 0,
+          "Avata": 0,
+          "M300": 0,
+          "Unknown": 104
+        },
+        "Avata": {
+          "Mavic": 0,
+          "Phantom": 40,
+          "Avata": 3,
+          "M300": 5,
+          "Unknown": 122
+        },
+        "M300": {
+          "Mavic": 0,
+          "Phantom": 13,
+          "Avata": 0,
+          "M300": 60,
+          "Unknown": 3
+        }
+      },
+      "unknown_rate": 0.7894,
+      "kept_accuracy": 0.5122
+    },
+    "detector_misses": 456,
+    "gt_total": 584,
+    "miss_rate": 0.7808,
+    "correct_family_predictions_all_ground_truth": 63
+  }
+}

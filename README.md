@@ -37,11 +37,12 @@ The system supports:
 - Export to Google Sheets with CSV fallback
 
 **Visual model scope:** the detector first locates a generic `drone`, then an
-optional image classifier predicts a broad DJI family from the cropped box.
-The family prediction is labeled as visual evidence in the snapshot, live
-alerts, and sheet; the registered product model still comes from a serial or
-Remote ID match to MongoDB. The available showcase dataset does not support
-exact SKU claims such as “Mavic 3.”
+optional image classifier predicts a supported family from the cropped box.
+The production checkpoint predicts broad Mavic/Phantom/Inspire labels; an
+experimental MMAUD checkpoint was evaluated for Mavic 2, Mavic 3, Phantom 4,
+Avata, and M300 but was not promoted. The family prediction is soft visual
+evidence in the snapshot, alerts, and sheet; registered identity still comes
+from a serial or Remote ID match to MongoDB.
 
 ## YOLO detector output
 
@@ -93,6 +94,29 @@ product model or unique drone identity.
   <img src="./screenshots/visual-family-image.jpg" alt="Single drone box with visual family prediction" width="720" />
 </p>
 
+### Real-footage family experiment (experimental)
+
+The MMAUD V1 experiment evaluates a separate candidate on real, wide-angle
+frames. It reached **58.7% family accuracy** across Mavic, Phantom, Avata, and
+M300 on 584 held-out crops. In the full detector-plus-classifier path, the
+detector missed **78.1%** of labeled targets, so only **10.8%** received the
+correct family label end to end. The test segments were held out temporally but
+come from flights also represented in training; cross-scene performance is
+unknown. The 80% target was not met, and the candidate is not the production
+checkpoint.
+
+<p align="center">
+  <img src="./screenshots/mmaud-m300-heldout-hit.jpg" alt="One held-out M300 frame detected and classified by the experimental pipeline" width="720" />
+</p>
+Credit: MMAUD V1, Yuan et al., ICRA 2024; shared under CC BY-NC-SA 4.0. See
+[dataset attribution](./docs/MMAUD_ATTRIBUTION.md).
+
+<p align="center">
+  <img src="./screenshots/mmaud-phantom4-heldout-miss.jpg" alt="A held-out Phantom 4 target missed by the detector, shown with a zoom of the ground-truth region" width="720" />
+</p>
+Credit: MMAUD V1, Yuan et al., ICRA 2024; shared under CC BY-NC-SA 4.0.
+The red inset is the labeled target that the detector failed to find.
+
 `images/` and `videos/` stay read-only inputs; the runtime detection snapshots live under `data/snapshots/` (gitignored — safe to delete any time).
 
 ## Architecture at a glance
@@ -113,6 +137,8 @@ flowchart LR
 - [DESCRIPTION.md](./DESCRIPTION.md) — contract and source-of-truth behavior for events, decision logic, and schemas
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — deeper repo map and diagrams
 - [docs/TRAINING.md](./docs/TRAINING.md) — training and dataset notes
+- [docs/MMAUD_REPORT.md](./docs/MMAUD_REPORT.md) — real-footage experiment, metrics, and limitations
+- [docs/LINKEDIN_POST_DRONE_VISION.md](./docs/LINKEDIN_POST_DRONE_VISION.md) — copy-ready post draft and image notes
 
 ## Repository structure
 
@@ -234,12 +260,11 @@ uv run python -m detector.main --source "..\videos\Imagine Seeing THIS Many DJI 
 ```
 
 The annotated snapshots and dashboard show the visual family with its
-confidence separately from the registered drone identity. Because the source
-dataset is synthetic, treat this as a showcase prototype and avoid accuracy
-claims until it is evaluated on held-out real camera footage.
-On the project's real sample images, the current classifier has produced
-incorrect family guesses (including Mavic predicted as “No Drone”); always
-review the annotated result and label it as a prediction, not ground truth.
+confidence separately from the registered drone identity. The production
+checkpoint was trained on synthetic images; its real-media predictions are
+unreliable. The newer MMAUD candidate is also experimental and misses the 80%
+target; see the [real-footage evaluation](./docs/MMAUD_REPORT.md) before using
+either model in a showcase claim.
 
 To create image-only showcase artifacts without sending events to the server,
 run these commands from `detector/`:
