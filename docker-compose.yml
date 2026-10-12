@@ -1,0 +1,91 @@
+# Drone Detect App — local stack (Docker). Windows: use Docker Desktop.
+# No Docker locally? Push a branch and let .github/workflows/ci.yml test it.
+#
+#   docker compose up -d mongo server        # server on http://localhost:8000, dashboard at /
+#   docker compose logs -f server
+#   curl.exe http://localhost:8000/health
+#   uv run tools/seed_db.py                  # seed via local uv (needs MONGO_URI=mongodb://localhost:8000? no: 27017)
+#   docker compose --profile detector run --rm detector --help
+#   docker compose down (-v to drop mongo-data)
+#
+# Ports: host ${PORT:-8000} -> server container 8080 (SERVER_ADDR=:8080 inside).
+# 8080 on the host is avoided by default (local Apache/XAMPP often owns it).
+# Data: ./data (snapshots, CSV exports) is a bind mount; mongo-data is a volume.
+# Media + weights are read-only inputs, mounted only into the detector profile.
+
+name: drone-detect-app
+
+services:
+  mongo:
+    image: mongo:8.0
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "${PORT:-8000}:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SERVER_ADDR: ":8080"
+      GIN_MODE: "${GIN_MODE:-release}"
+      MONGO_URI: "mongodb://mongo:27017"
+      MONGO_DB: "${MONGO_DB:-drone_detect_app}"
+      EXPORT_BACKEND: "${EXPORT_BACKEND:-csv}"
+      EXPORT_IDENTIFIED_ONLY: "${EXPORT_IDENTIFIED_ONLY:-true}"
+      SNAPSHOT_DIR: /app/data/snapshots
+      BEACON_WINDOW_S: "${BEACON_WINDOW_S:-3}"
+      BEACON_RETENTION_S: "${BEACON_RETENTION_S:-60}"
+      RESOLVE_GRACE_MS: "${RESOLVE_GRACE_MS:-1500}"
+      VISUAL_MIN_CONF: "${VISUAL_MIN_CONF:-0.5}"
+    volumes:
+      - ./data:/app/data
+
+  # Optional one-shot detector (needs weights + media mounts to do real work).
+  detector:
+    build:
+      context: .
+      dockerfile: detector/Dockerfile
+    profiles: ["detector"]
+    depends_on:
+      - server
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      WS_URL: "ws://server:8080/ws/detector"
+      YOLO_WEIGHTS: "${YOLO_WEIGHTS:-/app/detector/models/drone.pt}"
+      YOLO_TARGET_CLASSES: "${YOLO_TARGET_CLASSES:-drone}"
+      YOLO_CONF: "${YOLO_CONF:-0.35}"
+      YOLO_IMGSZ: "${YOLO_IMGSZ:-640}"
+      ZONE_ID: "${ZONE_ID:-north-gate}"
+      SOURCE_ID: "${SOURCE_ID:-cam-01}"
+      SNAPSHOT_DIR: /app/data/snapshots
+      DETECTOR_CLOCK: "${DETECTOR_CLOCK:-video}"
+    volumes:
+      - ./data:/app/data
+      - ./detector/models:/app/detector/models:ro
+      - ./videos:/app/videos:ro
+      - ./images:/app/images:ro
+    # Example override at runtime:
+    # docker compose --profile detector run --rm detector --source /app/videos --clock video
+
+volumes:
+  mongo-data:

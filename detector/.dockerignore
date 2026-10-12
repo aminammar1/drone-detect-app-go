@@ -1,0 +1,16 @@
+# Keep the detector build context small. Weights (*.pt), media and
+# secrets are mounted at runtime, never baked into the image.
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+models/*.pt
+*.onnx
+*.engine
+data/
+videos/
+images/
+.env
+secrets/
+.git/
+runs/

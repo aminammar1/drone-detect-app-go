@@ -1,0 +1,66 @@
+# CI: Go tests + detector checks + Docker build/stack test.
+# Docker is NOT required on dev machines (Windows); the `docker` job runs
+# here on ubuntu-latest where Docker is preinstalled.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+          cache-dependency-path: server/go.sum
+      - run: go vet ./...
+        working-directory: server
+      - run: go test ./...
+        working-directory: server
+
+  detector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - run: uv sync --frozen
+        working-directory: detector
+      - run: uv run ruff check .
+        working-directory: detector
+      - run: uv run ruff format --check .
+        working-directory: detector
+      - run: uv run pytest -q
+        working-directory: detector
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file
+        run: docker compose config --quiet
+      - name: Build images
+        run: docker compose build server detector
+      - name: Detector image boots
+        run: docker run --rm drone-detect-app-detector --help
+      - name: Start mongo + server
+        run: docker compose up -d mongo server
+      - name: Wait for /health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/health; then exit 0; fi
+            sleep 2
+          done
+          echo "server never became healthy" >&2
+          docker compose logs server
+          exit 1
+      - name: Show status on failure
+        if: failure()
+        run: docker compose ps; docker compose logs server; docker compose logs mongo
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

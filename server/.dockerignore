@@ -1,0 +1,14 @@
+# Keep the server build context small. Weights, media, secrets and
+# local runtime data never go into the image (see root .gitignore).
+.venv/
+bin/
+dist/
+data/
+videos/
+images/
+.env
+secrets/
+*.pt
+*.onnx
+*.engine
+.git/
