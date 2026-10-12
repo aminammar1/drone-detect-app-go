@@ -1,2 +1,4 @@
 # Normalize line endings (Windows-first development)
 * text=auto
+# Container entrypoints must stay LF everywhere: CRLF breaks #!/bin/sh.
+server/entrypoint.sh text eol=lf
